@@ -23,6 +23,13 @@ if [ -f .env ]; then
     esac
   done < <(grep -E '^[A-Z_]+=' .env)
 fi
+# copie compilée sur sa machine : le dépôt GitHub d'origine (git remote origin), pour qu'elle reçoive aussi les mises à jour
+if [ -z "${GITHUB_REPOSITORY:-}" ]; then
+  ORIGIN="$(git remote get-url origin 2>/dev/null || true)"
+  case "$ORIGIN" in
+    *github.com[:/]*) GITHUB_REPOSITORY="$(echo "$ORIGIN" | sed -E 's#.*github\.com[:/]##; s#\.git$##')" ;;
+  esac
+fi
 if [ -z "${STRAPONTIN_FEED_URL:-}" ] && [ -n "${GITHUB_REPOSITORY:-}" ]; then
   STRAPONTIN_FEED_URL="https://github.com/$GITHUB_REPOSITORY/releases/latest/download/appcast.xml"
 fi
