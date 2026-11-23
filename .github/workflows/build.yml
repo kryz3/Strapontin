@@ -12,11 +12,18 @@ permissions:
 jobs:
   build:
     runs-on: macos-15
+    env:
+      # libmpv de Homebrew : en-têtes et bibliothèque trouvés même si SwiftPM ne passe pas par pkg-config
+      PKG_CONFIG_PATH: /opt/homebrew/lib/pkgconfig
+      CPATH: /opt/homebrew/include
+      LIBRARY_PATH: /opt/homebrew/lib
     steps:
       - uses: actions/checkout@v4
 
       - name: Dépendances
-        run: brew install mpv dylibbundler pkg-config transmission-cli molten-vk
+        run: |
+          brew install mpv dylibbundler pkg-config transmission-cli molten-vk
+          pkg-config --cflags --libs mpv || echo "pkg-config ne trouve pas mpv : CPATH / LIBRARY_PATH prennent le relais"
 
       - name: Tests
         run: swift test
