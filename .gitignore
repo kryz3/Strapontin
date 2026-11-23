@@ -1,0 +1,27 @@
+# compilation
+.build/
+/build/
+.swiftpm/
+*.xcodeproj
+DerivedData/
+
+# secrets et réglages locaux (voir .env.example)
+.env
+.env.*
+!.env.example
+*.p8
+*.pem
+*-private
+
+# notes et fichiers de travail locaux, jamais publiés
+CLAUDE.md
+.claude/
+RAPPORT*.md
+NOTES*.md
+captures/
+*.diff
+*.patch
+_transfer/
+*.tgz
+
+.DS_Store
