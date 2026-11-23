@@ -3,6 +3,20 @@
 Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), versions [SemVer](https://semver.org/lang/fr/).
 La section d'une version sert de notes à sa release GitHub.
 
+## [0.1.1] - 2026-11-23
+
+- Navigation façon Apple TV : barre d'onglets translucide qui flotte sur les images et s'efface en défilant ;
+  la barre latérale disparaît. Une page Recherche avec le seul champ de l'app (loupe ou ⌘F).
+- Recherche : sections Bibliothèque, Films et Séries affichées tout de suite, chacune remplie dès que sa réponse
+  arrive (squelettes d'affiches pendant l'attente), « Aucun résultat » ou erreur par section ; pastilles de l'indexeur
+  chargées ensuite, sans bloquer les affiches.
+- Plus rapide : réponses TMDb et images en cache (mémoire et disque), une seule connexion réutilisée, identification
+  de la bibliothèque en parallèle, fiche préchargée au survol d'une affiche.
+- Interface optimiste : lancer, mettre en pause, reprendre ou annuler un téléchargement, supprimer un titre, corriger
+  une fiche se voit immédiatement, avec retour en arrière et message discret si l'action échoue.
+- Nouvelle icône : un fauteuil de cinéma rouge.
+- README.env.md : obtenir une clé TMDb et brancher un indexeur pas à pas.
+
 ## [0.1.0] - 2026-11-23
 
 Première version publique. Strapontin s'appelait « Lecteur » : ses données et réglages sont repris au premier

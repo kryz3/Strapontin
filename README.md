@@ -34,9 +34,11 @@ documentation are in French.*
 - Fiche erronée : « Corriger la fiche », et la page suit la nouvelle fiche.
 
 **Interface**
-- Barre latérale repliable (⌃⌘S, et d'elle-même quand la fenêtre est étroite) : Accueil, Films, Séries, Découvrir,
-  téléchargements en cours, Stockage, Réglages. Une seule recherche, en haut de la fenêtre (⌘F) : ta bibliothèque
-  et tout le catalogue TMDb.
+- Navigation façon Apple TV : une barre d'onglets translucide qui flotte sur les images (Accueil, Films, Séries,
+  Découvrir, téléchargements en cours) et s'efface quand on fait défiler. Une seule recherche (loupe ou ⌘F) : ta
+  bibliothèque et tout le catalogue TMDb, section par section.
+- Tout réagit tout de suite : un téléchargement lancé apparaît aussitôt, une pause, une suppression ou une fiche
+  corrigée se voient avant même la réponse du moteur ou du réseau (et reviennent en arrière si ça échoue).
 - Grand visuel plein cadre qui défile avec le logo du titre ; rangées « À suivre » (avec progression),
   « Ajoutés récemment », par genre ; fiches immersives, distribution, informations.
 - Séries épisode par épisode : image, date, durée et résumé de chaque épisode, une fiche par épisode avec
@@ -78,6 +80,9 @@ Configuration requise : Mac Apple Silicon, macOS 14 ou plus.
 
 ## Configurer
 
+Toutes les clés se saisissent dans les Réglages, ou dans un fichier `.env` si tu compiles ta copie : voir
+**[README.env.md](README.env.md)** pour obtenir une clé TMDb et brancher un indexeur pas à pas.
+
 | Réglage | Où | |
 |---|---|---|
 | Dossiers de la bibliothèque | Réglages › Bibliothèque | `~/Documents/Films` et `~/Documents/Séries` par défaut |
@@ -93,7 +98,7 @@ Les clés restent sur ton Mac (la clé de l'indexeur dans un fichier lisible par
 
 ```sh
 brew install mpv dylibbundler pkg-config transmission-cli molten-vk
-cp .env.example .env        # puis renseigne TMDB_API_KEY (facultatif)
+cp .env.example .env        # puis renseigne-le (voir README.env.md)
 swift test
 ./scripts/bundle.sh         # build/Strapontin.app, build/Strapontin.dmg, build/Strapontin.zip
 ```
@@ -153,4 +158,4 @@ contient doit l'être sous une licence compatible.
 - [Transmission](https://transmissionbt.com) : moteur de téléchargement intégré.
 - [Sparkle](https://sparkle-project.org) : mises à jour (licence MIT).
 - [TMDb](https://www.themoviedb.org) : fiches, affiches et images.
-  *This product uses the TMDB API but is not endorsed or certified by TMDB.*
+  *This product uses TMDB and the TMDB APIs but is not endorsed, certified, or otherwise approved by TMDB.*
