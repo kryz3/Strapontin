@@ -101,6 +101,17 @@ struct StrapontinApp: App {
             CommandGroup(after: .appInfo) {
                 UpdateMenuItem()
             }
+            // menu « Aller » : chaque page de la barre du haut, plus Stockage et Indexeur (sans bouton dédié)
+            CommandMenu("Aller") {
+                Button("Accueil") { GoTo.open(TopTab.home.rawValue) }.keyboardShortcut("1", modifiers: .command)
+                Button("Films") { GoTo.open(TopTab.movies.rawValue) }.keyboardShortcut("2", modifiers: .command)
+                Button("Séries") { GoTo.open(TopTab.shows.rawValue) }.keyboardShortcut("3", modifiers: .command)
+                Button("Découvrir") { GoTo.open(TopTab.discover.rawValue) }.keyboardShortcut("4", modifiers: .command)
+                Button("Recherche") { GoTo.open(TopTab.search.rawValue) }
+                Divider()
+                Button("Stockage") { GoTo.open("storage") }.keyboardShortcut("s", modifiers: [.command, .shift])
+                Button("Indexeur") { GoTo.open("tracker") }.keyboardShortcut("i", modifiers: [.command, .shift])
+            }
             CommandGroup(after: .newItem) {
                 Button("Rescanner la bibliothèque") { store.rescan(retryNotFound: true) }
                     .keyboardShortcut("r", modifiers: .command)

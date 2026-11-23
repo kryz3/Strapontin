@@ -22,6 +22,9 @@ final class ImageCache {
     static let shared = ImageCache()
     private let cache = NSCache<NSString, NSImage>()
 
+    /// Après un retéléchargement : les images absentes ont pu être mémorisées comme « rien ».
+    func forget() { cache.removeAllObjects() }
+
     func image(at url: URL) async -> NSImage? {
         if let img = cache.object(forKey: url.path as NSString) { return img }
         let img = await Task.detached(priority: .utility) { NSImage(contentsOf: url) }.value
@@ -30,10 +33,19 @@ final class ImageCache {
     }
 }
 
+/// Change quand des visuels viennent d'être retéléchargés : les images locales vides se rechargent.
+@MainActor
+final class ArtworkRevision: ObservableObject {
+    static let shared = ArtworkRevision()
+    @Published private(set) var value = 0
+    func bump() { value += 1 }
+}
+
 struct LocalImage: View {
     let url: URL?
     var contentMode: ContentMode = .fill
     @State private var image: NSImage?
+    @ObservedObject private var revision = ArtworkRevision.shared
 
     init(url: URL?, contentMode: ContentMode = .fill) {
         self.url = url
@@ -46,8 +58,9 @@ struct LocalImage: View {
                 Image(nsImage: image).resizable().aspectRatio(contentMode: contentMode).transition(.opacity)
             }
         }
-        .task(id: url) {
+        .task(id: "\(url?.path ?? "")#\(revision.value)") {
             guard let url else { image = nil; return }
+            if image != nil, revision.value > 0 { return }
             let img = await ImageCache.shared.image(at: url)
             withAnimation(.easeOut(duration: 0.3)) { image = img }
         }

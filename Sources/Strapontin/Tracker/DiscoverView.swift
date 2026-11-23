@@ -130,7 +130,6 @@ struct SearchPage: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 36) {
-                field.padding(.horizontal, Theme.margin)
                 if query.isEmpty {
                     Text("Cherche un film, une série, un acteur ou un genre : dans ta bibliothèque et dans tout le catalogue.")
                         .foregroundStyle(.secondary).padding(.horizontal, Theme.margin)
@@ -139,10 +138,18 @@ struct SearchPage: View {
                     TMDbSearchSections(query: query)
                 }
             }
-            .padding(.top, 76)
+            .padding(.top, 150)
             .padding(.bottom, 40)
         }
         .ignoresSafeArea(edges: .top)
+        // le champ reste en haut, comme sur l'Apple TV : les résultats passent dessous, dans un fondu
+        .overlay(alignment: .top) {
+            field.padding(.horizontal, Theme.margin).padding(.top, 62).padding(.bottom, 34)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(LinearGradient(stops: [.init(color: Theme.background, location: 0), .init(color: Theme.background, location: 0.8),
+                                                   .init(color: Theme.background.opacity(0), location: 1)],
+                                           startPoint: .top, endPoint: .bottom).ignoresSafeArea(edges: .top))
+        }
         .onAppear { if query.isEmpty { focused = true } }
         .onReceive(NotificationCenter.default.publisher(for: SearchFocus.name)) { _ in focused = true }
     }
@@ -175,7 +182,8 @@ struct SearchPage: View {
         }
         .padding(.horizontal, 20).padding(.vertical, 15)
         .frame(maxWidth: 720)
-        .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(.white.opacity(focused ? 0.12 : 0.08)))
+        // fond opaque : les affiches qui défilent dessous ne transparaissent pas dans le champ
+        .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color(white: focused ? 0.19 : 0.15)))
         .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(focused ? Theme.accentText.opacity(0.6) : .white.opacity(0.1), lineWidth: 1))
         .contentShape(Rectangle())
         .onTapGesture { focused = true }

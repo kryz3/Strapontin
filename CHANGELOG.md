@@ -3,6 +3,15 @@
 Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), versions [SemVer](https://semver.org/lang/fr/).
 La section d'une version sert de notes à sa release GitHub.
 
+## [0.1.2] - 2026-11-23
+
+- Images de la bibliothèque de retour (Accueil, Films, Séries, fiches) : les affiches et fonds restés dans le cache de
+  l'ancienne app sont repris, et tout visuel absent du disque est retéléchargé au lancement.
+- Barre du haut : capsule en verre avec une ombre douce, plus de bande floue qui apparaît en faisant défiler ;
+  elle s'efface et revient en douceur. Le champ de la page Recherche reste en haut.
+- Réglages : roue dentée discrète dans la capsule (⌘,) ; nouveau menu Aller (⌘1 à ⌘4, Stockage, Indexeur).
+- Une copie compilée sur sa machine reçoit aussi les mises à jour.
+
 ## [0.1.1] - 2026-11-23
 
 - Navigation façon Apple TV : barre d'onglets translucide qui flotte sur les images et s'efface en défilant ;

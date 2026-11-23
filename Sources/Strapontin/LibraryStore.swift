@@ -104,6 +104,28 @@ final class LibraryStore: ObservableObject {
             try? FileManager.default.createDirectory(atPath: f, withIntermediateDirectories: true)
         }
         foldersChanged()
+        Task { await repairArtwork() }
+    }
+
+    /// Affiches et fonds absents du disque : retéléchargés (4 à la fois), puis la bibliothèque se redessine.
+    func repairArtwork() async {
+        guard let client = tmdb() else { return }
+        let fm = FileManager.default
+        let todo = Artwork.missing(Array(media.values), posterURL: posterURL, backdropURL: backdropURL,
+                                   exists: { fm.fileExists(atPath: $0.path) })
+        guard !todo.isEmpty else { return }
+        let t0 = ContinuousClock.now
+        for start in stride(from: 0, to: todo.count, by: 4) {
+            await withTaskGroup(of: Void.self) { group in
+                for m in todo[start..<min(start + 4, todo.count)] {
+                    group.addTask { _ = await client.downloadImage(m.path, size: m.size, to: m.destination) }
+                }
+            }
+        }
+        ImageCache.shared.forget()
+        ArtworkRevision.shared.bump()
+        rebuild()
+        Perf.log("visuels retéléchargés : \(todo.count)", since: t0)
     }
 
     func foldersChanged() {

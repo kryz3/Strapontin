@@ -32,6 +32,7 @@ enum LegacyMigration {
 
     static func runIfNeeded() {
         let d = UserDefaults.standard
+        mergeCaches()
         guard !d.bool(forKey: doneKey) else { return }
         let fm = FileManager.default
         let support = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -63,11 +64,27 @@ enum LegacyMigration {
             }
         }
 
+        d.set(true, forKey: doneKey)
+    }
+
+    /// Caches de l'ancienne app (affiches, fonds, vignettes, empreintes audio) : déplacés dans ceux de Strapontin.
+    /// Si le dossier de Strapontin existe déjà (créé avant la reprise), on le complète, élément par élément, sans
+    /// rien écraser. Lancé à chaque démarrage tant qu'il reste quelque chose à reprendre (la 0.1.0 et la 0.1.1 ne le
+    /// faisaient que si le dossier n'existait pas encore : les affiches de la bibliothèque restaient de l'autre côté).
+    static func mergeCaches() {
+        let fm = FileManager.default
         let caches = fm.urls(for: .cachesDirectory, in: .userDomainMask)[0]
         let oldCache = caches.appendingPathComponent("Lecteur"), newCache = caches.appendingPathComponent("Strapontin")
-        if isRealDirectory(oldCache), !fm.fileExists(atPath: newCache.path) { try? fm.moveItem(at: oldCache, to: newCache) }
-
-        d.set(true, forKey: doneKey)
+        guard isRealDirectory(oldCache) else { return }
+        if !fm.fileExists(atPath: newCache.path) { try? fm.moveItem(at: oldCache, to: newCache); return }
+        for dir in ["posters", "backdrops", "vignettes", "empreintes"] {
+            let from = oldCache.appendingPathComponent(dir), to = newCache.appendingPathComponent(dir)
+            guard isRealDirectory(from) else { continue }
+            try? fm.createDirectory(at: to, withIntermediateDirectories: true)
+            for name in (try? fm.contentsOfDirectory(atPath: from.path)) ?? [] where !fm.fileExists(atPath: to.appendingPathComponent(name).path) {
+                try? fm.moveItem(at: from.appendingPathComponent(name), to: to.appendingPathComponent(name))
+            }
+        }
     }
 
     private static func isRealDirectory(_ url: URL) -> Bool {

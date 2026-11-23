@@ -56,20 +56,26 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Theme.backdrop)
                 .overlay(alignment: .top) { TopScrim() }
+                .withoutScrollEdgeBand()
                 .navigationDestination(for: String.self) { id in
                     // l'image va jusqu'au bord, sous la barre d'outils, comme à l'accueil
                     destination(id)
                         .toolbarBackground(.hidden, for: .windowToolbar)
                         .overlay(alignment: .top) { TopScrim() }
+                        .withoutScrollEdgeBand()
                 }
                 .toolbar {
                     ToolbarItem(placement: .principal) {
                         TopBar(tab: $tab, downloading: downloadingCount, showIndexer: tracker.configured,
                                open: { path = NavigationPath(); path.append($0) })
+                            // s'efface en douceur, en remontant un peu, comme sur l'Apple TV
                             .opacity(barHidden ? 0 : 1)
+                            .offset(y: barHidden ? -8 : 0)
+                            .scaleEffect(barHidden ? 0.96 : 1)
                             .allowsHitTesting(!barHidden)
-                            .animation(.easeInOut(duration: 0.25), value: barHidden)
+                            .animation(.spring(response: 0.35, dampingFraction: 0.9), value: barHidden)
                     }
+                    .hidingSharedBackground()
                 }
                 .toolbarBackground(.hidden, for: .windowToolbar)
         }
@@ -78,6 +84,12 @@ struct ContentView: View {
         .background(Button("") { path = NavigationPath(); tab = .search; SearchFocus.request() }
             .keyboardShortcut("f", modifiers: .command).hidden())
         .onChange(of: tab) { _, _ in path = NavigationPath(); barHidden = false }
+        // menu Aller (⌘1 à ⌘4, Stockage, Indexeur)
+        .onReceive(NotificationCenter.default.publisher(for: GoTo.name)) { n in
+            guard let target = n.object as? String else { return }
+            if let t = TopTab(rawValue: target) { path = NavigationPath(); tab = t; if t == .search { SearchFocus.request() } }
+            else { path = NavigationPath(); path.append(target) }
+        }
         .onChange(of: path) { _, _ in barHidden = false }
         .onChange(of: downloadingCount) { _, n in if n == 0 && tab == .downloads { tab = .home } }
         // .torrent ou magnet déposé sur la fenêtre : il apparaît dans la bibliothèque, avec sa fiche si on la trouve
@@ -148,21 +160,21 @@ private struct TopBar: View {
             icon("magnifyingglass", .search, help: "Recherche (⌘F)")
             ForEach([TopTab.home, .movies, .shows, .discover]) { item($0) }
             if downloading > 0 { item(.downloads, count: downloading) }
-            Menu {
-                SettingsLink { Text("Réglages…") }
+            SettingsLink {
+                Image(systemName: "gearshape").font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Color.white.opacity(0.85))
+                    .frame(width: 30, height: 26).contentShape(Capsule())
+            }
+            .buttonStyle(.plain)
+            .help("Réglages (⌘,)")
+            .contextMenu {
                 Button("Stockage") { open("storage") }
                 if showIndexer { Button("Indexeur") { open("tracker") } }
-            } label: {
-                Image(systemName: "gearshape").font(.system(size: 13, weight: .semibold))
-                    .frame(width: 30, height: 26).contentShape(Rectangle())
             }
-            .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
-            .foregroundStyle(.white.opacity(0.85))
-            .help("Réglages, stockage")
         }
         .padding(3)
-        .background(.ultraThinMaterial, in: Capsule())
-        .overlay(Capsule().stroke(.white.opacity(0.12), lineWidth: 0.5))
+        .capsuleGlass()
+        .shadow(color: .black.opacity(0.35), radius: 14, y: 5)
         .environment(\.colorScheme, .dark)
         .animation(.spring(response: 0.3, dampingFraction: 0.85), value: tab)
     }
@@ -232,8 +244,11 @@ private struct ScrollDirectionWatcher: NSViewRepresentable {
 /// Voile sombre sous la barre d'outils : onglets et bouton retour restent lisibles sur une image claire.
 private struct TopScrim: View {
     var body: some View {
-        LinearGradient(colors: [.black.opacity(0.55), .clear], startPoint: .top, endPoint: .bottom)
-            .frame(height: 110).ignoresSafeArea(edges: .top).allowsHitTesting(false)
+        // voile progressif (pas de bande nette) : la capsule et les boutons de la fenêtre restent lisibles
+        // sur n'importe quelle image ou affiche qui passe dessous
+        LinearGradient(stops: [.init(color: .black.opacity(0.7), location: 0), .init(color: .black.opacity(0.35), location: 0.5),
+                               .init(color: .clear, location: 1)], startPoint: .top, endPoint: .bottom)
+            .frame(height: 120).ignoresSafeArea(edges: .top).allowsHitTesting(false)
     }
 }
 
@@ -453,5 +468,44 @@ struct EmptyLibrary: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.top, compact ? 30 : 180)
+    }
+}
+
+/// Aller à une page depuis le menu (« Aller » de la barre des menus) : onglet ou page (« storage », « tracker »).
+enum GoTo {
+    static let name = Notification.Name("strapontin.goto")
+    static func open(_ target: String) { NotificationCenter.default.post(name: name, object: target) }
+}
+
+extension View {
+    /// Capsule de la barre du haut : verre de macOS 26 et plus (Liquid Glass), sinon matériau très fin et liseré.
+    @ViewBuilder func capsuleGlass() -> some View {
+        if #available(macOS 26.0, *) {
+            self.glassEffect(.regular, in: Capsule())
+        } else {
+            self.background(.ultraThinMaterial, in: Capsule())
+                .overlay(Capsule().stroke(.white.opacity(0.12), lineWidth: 0.5))
+        }
+    }
+
+    /// Pas de bande floue pleine largeur sous la barre d'outils quand on fait défiler (macOS 26 et plus) :
+    /// les images passent sous la capsule, adoucies par le voile du haut.
+    @ViewBuilder func withoutScrollEdgeBand() -> some View {
+        if #available(macOS 26.0, *) {
+            self.scrollEdgeEffectHidden(true, for: .top)
+        } else {
+            self
+        }
+    }
+}
+
+extension ToolbarItem {
+    /// La capsule a déjà son fond : pas de second fond de barre d'outils autour (macOS 26 et plus).
+    @ToolbarContentBuilder func hidingSharedBackground() -> some ToolbarContent {
+        if #available(macOS 26.0, *) {
+            self.sharedBackgroundVisibility(.hidden)
+        } else {
+            self
+        }
     }
 }
