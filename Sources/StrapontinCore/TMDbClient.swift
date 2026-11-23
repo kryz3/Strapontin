@@ -32,10 +32,39 @@ public final class TMDbClient: @unchecked Sendable {
         self.key = key.trimmingCharacters(in: .whitespacesAndNewlines)
         self.language = language
         self.omdbKey = omdbKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        self.session = URLSession(configuration: .default)
+        self.session = Self.sharedSession
+    }
+
+    /// Une seule session pour toute l'app : connexions réutilisées (HTTP/2) au lieu d'une nouvelle poignée de main
+    /// à chaque client créé, et cache HTTP des images.
+    public static let sharedSession: URLSession = {
+        let cfg = URLSessionConfiguration.default
+        cfg.httpMaximumConnectionsPerHost = 8
+        cfg.timeoutIntervalForRequest = 20
+        return URLSession(configuration: cfg)
+    }()
+
+    /// Durée de vie en cache d'une réponse selon la requête : fiches et saisons longtemps, recherches et tendances moins.
+    static func ttl(_ path: String) -> TimeInterval {
+        if path.hasPrefix("/search") { return 30 * 60 }
+        if path.hasPrefix("/trending") || path.hasSuffix("/popular") { return 3 * 3600 }
+        if path == "/configuration" { return 0 }
+        return 24 * 3600
     }
 
     func get(_ path: String, _ params: [String: String] = [:]) async throws -> [String: Any] {
+        let ttl = Self.ttl(path)
+        let cacheKey = path + "?" + params.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: "&") + "&language=" + language
+        let data: Data
+        if ttl > 0 {
+            data = try await TMDbCache.shared.data(for: cacheKey, ttl: ttl) { [self] in try await fetch(path, params) }
+        } else {
+            data = try await fetch(path, params)
+        }
+        return (try JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
+    }
+
+    private func fetch(_ path: String, _ params: [String: String]) async throws -> Data {
         var comps = URLComponents(string: "https://api.themoviedb.org/3" + path)!
         var items = params.map { URLQueryItem(name: $0.key, value: $0.value) }
         items.append(URLQueryItem(name: "language", value: language))
@@ -56,7 +85,7 @@ public final class TMDbClient: @unchecked Sendable {
             }
             if code == 401 { throw TMDbError.badKey }
             guard (200..<300).contains(code) else { throw TMDbError.http(code) }
-            return (try JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
+            return data
         }
         throw TMDbError.rateLimited
     }

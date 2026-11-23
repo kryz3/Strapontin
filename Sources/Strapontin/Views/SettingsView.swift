@@ -81,7 +81,7 @@ private struct MetadataSettings: View {
                     if let test { Text(test).foregroundStyle(.secondary) }
                 }
             } footer: {
-                Text("Les fiches viennent de TMDb, qui fournit aussi le lien IMDb. Une clé saisie ici remplace celle fournie avec l'app. IMDb n'a pas d'API publique : la note IMDb passe par OMDb (clé gratuite sur omdbapi.com).")
+                Text("Les fiches viennent de TMDb, qui fournit aussi le lien IMDb. Une clé saisie ici remplace celle fournie avec l'app. IMDb n'a pas d'API publique : la note IMDb passe par OMDb (clé gratuite sur omdbapi.com).\n\nThis product uses TMDB and the TMDB APIs but is not endorsed, certified, or otherwise approved by TMDB.")
                     .foregroundStyle(.secondary)
             }
         }

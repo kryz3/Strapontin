@@ -296,8 +296,15 @@ final class TrackerModel: ObservableObject {
         if let hash {
             DownloadsModel.shared.link(hash: hash, media: media, mediaKey: media?.key, season: season, episode: episode,
                                        episodeEnd: episodeEnd, source: media == nil ? .manual : .tracker)
+            // l'affiche apparaît tout de suite dans « En téléchargement », sans attendre le moteur
+            DownloadsModel.shared.showStarting(hash: hash, name: release, savePath: dest)
         }
-        try await engine.add(payload, savePath: dest)
+        do {
+            try await engine.add(payload, savePath: dest)
+        } catch {
+            if let hash { DownloadsModel.shared.dropStarting(hash: hash) }
+            throw error
+        }
         history.append(GrabRecord(followId: media?.key ?? "", season: season, episode: episode,
                                   infoHash: hash, release: release, date: Date()))
         note("↓ \(release)")

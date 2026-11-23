@@ -19,6 +19,14 @@ final class DownloadsModel: ObservableObject {
     @Published var showTorrentImporter = false
 
     private var lastProgress: [String: Double] = [:]
+    // Interface optimiste : chaque action se voit tout de suite, avant la réponse du moteur, puis se réconcilie
+    // (ou revient en arrière avec un message si le moteur refuse).
+    /// Téléchargements lancés que le moteur ne liste pas encore : affiche « Préparation » en attendant.
+    private var starting: [String: Torrent] = [:]
+    /// État affiché en attendant la confirmation (pause / reprise).
+    private var stateOverride: [String: String] = [:]
+    /// Retirés de l'affichage tout de suite (annulation).
+    private var hidden: Set<String> = []
     /// Quand chaque torrent a été vu se terminer, pour « Ajout à la bibliothèque… » (le temps du scan seulement).
     private var finishedAt: [String: Date] = [:]
     private var loop: Task<Void, Never>?
@@ -151,8 +159,38 @@ final class DownloadsModel: ObservableObject {
         }
     }
 
+    /// Ce que l'interface montre : la liste du moteur corrigée par les actions en cours.
+    private var shownTorrents: [Torrent] {
+        var list = torrents.filter { !hidden.contains($0.hash.lowercased()) }.map { t -> Torrent in
+            guard let st = stateOverride[t.hash.lowercased()], !t.isDone else { return t }
+            var t = t; t.state = st; if st != "pausedDL" { t.dlspeed = max(t.dlspeed, 0) } else { t.dlspeed = 0 }
+            return t
+        }
+        let present = Set(torrents.map { $0.hash.lowercased() })
+        list += starting.values.filter { !present.contains($0.hash) && !hidden.contains($0.hash) }
+        return list
+    }
+
+    /// Lancement : l'affiche apparaît tout de suite dans « En téléchargement », en « Préparation ».
+    func showStarting(hash: String, name: String, savePath: String?) {
+        let h = hash.lowercased()
+        guard !torrents.contains(where: { $0.hash.lowercased() == h }) else { return }
+        starting[h] = Torrent(hash: h, name: name, progress: 0, state: "metaDL", dlspeed: 0, eta: 0, size: 0,
+                              savePath: savePath ?? "", contentPath: "", addedOn: Date().timeIntervalSince1970)
+        rebuild()
+    }
+
+    /// Lancement refusé par le moteur : l'affiche provisoire disparaît.
+    func dropStarting(hash: String) {
+        if starting.removeValue(forKey: hash.lowercased()) != nil { rebuild() }
+    }
+
     private func rebuild() {
-        let e = DownloadBoard.build(torrents: torrents, book: book)
+        // ce que le moteur confirme n'a plus besoin d'être simulé
+        let present = Set(torrents.map { $0.hash.lowercased() })
+        starting = starting.filter { !present.contains($0.key) && Date().timeIntervalSince1970 - $0.value.addedOn < 120 }
+        hidden = hidden.filter { present.contains($0) }
+        let e = DownloadBoard.build(torrents: shownTorrents, book: book)
         if e != entries { entries = e }
     }
 
@@ -247,31 +285,70 @@ final class DownloadsModel: ObservableObject {
 
     // MARK: actions
 
-    func run(_ op: @escaping (any TorrentClient) async throws -> Void) {
+    /// Action envoyée au moteur. `rollback` défait ce que l'interface a montré d'avance si le moteur refuse.
+    func run(_ op: @escaping (any TorrentClient) async throws -> Void, rollback: (() -> Void)? = nil, label: String = "action") {
+        let t0 = ContinuousClock.now
         Task {
+            defer { Perf.log("\(label) : confirmation du moteur", since: t0) }
             do {
                 guard let c = try await currentClient() else {
+                    rollback?(); rebuild()
                     error = "Choisis un moteur de téléchargement dans les réglages."
                     return
                 }
                 try await op(c)
                 await refresh()
-            } catch { self.error = error.localizedDescription }
+            } catch {
+                rollback?(); rebuild()
+                self.error = error.localizedDescription
+            }
         }
     }
 
-    func pause(_ hashes: [String]) { run { try await $0.pause(hashes) } }
-    func resume(_ hashes: [String]) { run { try await $0.resume(hashes) } }
+    func pause(_ hashes: [String]) { setState(hashes, "pausedDL") { try await $0.pause(hashes) } }
+    func resume(_ hashes: [String]) { setState(hashes, "downloading") { try await $0.resume(hashes) } }
+
+    /// Pause / reprise : l'état change à l'écran tout de suite, la réponse du moteur le confirme ou le défait.
+    private func setState(_ hashes: [String], _ state: String, _ op: @escaping (any TorrentClient) async throws -> Void) {
+        let keys = hashes.map { $0.lowercased() }
+        let t0 = ContinuousClock.now
+        for k in keys { stateOverride[k] = state }
+        rebuild()
+        let label = state == "pausedDL" ? "pause" : "reprise"
+        Perf.log("\(label) : affiché", since: t0)
+        run({ c in
+            try await op(c)
+        }, rollback: { [weak self] in keys.forEach { self?.stateOverride[$0] = nil } }, label: label)
+        // après la confirmation (ou l'échec), le moteur fait foi
+        Task { try? await Task.sleep(nanoseconds: 4_000_000_000); keys.forEach { self.stateOverride[$0] = nil }; self.rebuild() }
+    }
+
+    /// Annulation : l'affiche disparaît tout de suite ; elle revient si le moteur refuse.
     func cancel(_ hashes: [String], deleteFiles: Bool) {
-        run { try await $0.delete(hashes, deleteFiles: deleteFiles) }
+        let keys = hashes.map { $0.lowercased() }
+        let t0 = ContinuousClock.now
+        keys.forEach { hidden.insert($0); starting[$0] = nil }
+        rebuild()
+        Perf.log("annulation : affiché", since: t0)
+        run({ try await $0.delete(hashes, deleteFiles: deleteFiles) },
+            rollback: { [weak self] in keys.forEach { self?.hidden.remove($0) } }, label: "annulation")
         if deleteFiles { LibraryStore.shared.rescan() }
     }
 
-    /// Ajout à la main : l'empreinte est notée tout de suite, la fiche est cherchée d'après le nom.
+    /// Ajout à la main : l'empreinte est notée tout de suite, l'affiche apparaît en « Préparation », la fiche est
+    /// cherchée d'après le nom.
     func add(_ payloads: [TorrentPayload], to dest: String?) {
-        for p in payloads { if let h = p.infoHash { book.recordManual(hash: h) } }
+        let t0 = ContinuousClock.now
+        let hashes = payloads.compactMap { $0.infoHash?.lowercased() }
+        for p in payloads {
+            guard let h = p.infoHash else { continue }
+            book.recordManual(hash: h)
+            showStarting(hash: h, name: p.displayName ?? "Téléchargement", savePath: dest)
+        }
         saveBook()
-        run { c in for p in payloads { try await c.add(p, savePath: dest) } }
+        Perf.log("lancement : affiché", since: t0)
+        run({ c in for p in payloads { try await c.add(p, savePath: dest) } },
+            rollback: { [weak self] in hashes.forEach { self?.starting[$0] = nil } }, label: "lancement")
     }
 
     func add(links: [String], to dest: String?) { add(links.map { TorrentPayload.magnet($0) }, to: dest) }

@@ -2,24 +2,13 @@ import StrapontinCore
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// Entrées de la barre latérale, comme dans les apps TV et Musique de macOS.
+/// Onglets de la barre du haut, façon Apple TV (tvOS) : une pastille translucide qui flotte sur les images.
 enum TopTab: String, Hashable, CaseIterable, Identifiable {
     // ni Bibliothèque (doublon de Films + Séries : ses filtres et tris sont dans « Tous les films » / « Toutes les
-    // séries ») ; les téléchargements sont sur les affiches, et dans leur entrée tant qu'il y en a en cours
-    case home = "Accueil", movies = "Films", shows = "Séries", discover = "Découvrir"
-    case downloads = "En téléchargement", indexer = "Indexeur", storage = "Stockage"
+    // séries ») ; les téléchargements sont sur les affiches, et dans leur onglet tant qu'il y en a en cours
+    case search = "Recherche", home = "Accueil", movies = "Films", shows = "Séries", discover = "Découvrir"
+    case downloads = "En téléchargement"
     var id: String { rawValue }
-    var icon: String {
-        switch self {
-        case .home: return "house"
-        case .movies: return "film"
-        case .shows: return "tv"
-        case .discover: return "sparkles.tv"
-        case .downloads: return "arrow.down.circle"
-        case .indexer: return "antenna.radiowaves.left.and.right"
-        case .storage: return "internaldrive"
-        }
-    }
 }
 
 enum LibraryFilter: String, CaseIterable, Identifiable {
@@ -56,25 +45,14 @@ struct ContentView: View {
     @State private var tab: TopTab = .home
     @State private var search = ""
     @State private var path = NavigationPath()
-    @State private var columns: NavigationSplitViewVisibility = .all
-    @State private var narrow = false
+    /// La barre s'efface quand on descend dans une page et revient dès qu'on remonte.
+    @State private var barHidden = false
     @ObservedObject private var downloads = DownloadsModel.shared
     @ObservedObject private var tracker = TrackerModel.shared
 
     var body: some View {
-        NavigationSplitView(columnVisibility: $columns) {
-            Sidebar(tab: $tab, downloading: downloadingCount, showIndexer: tracker.configured)
-                .navigationSplitViewColumnWidth(min: 190, ideal: 220, max: 280)
-        } detail: {
-            NavigationStack(path: $path) {
-                Group {
-                    // une seule recherche, en haut de la fenêtre : ses résultats remplacent la page, d'où qu'on la lance
-                    if !query.isEmpty {
-                        SearchResultsView(query: query)
-                    } else {
-                        page(tab)
-                    }
-                }
+        NavigationStack(path: $path) {
+            page(tab)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Theme.backdrop)
                 .overlay(alignment: .top) { TopScrim() }
@@ -84,23 +62,24 @@ struct ContentView: View {
                         .toolbarBackground(.hidden, for: .windowToolbar)
                         .overlay(alignment: .top) { TopScrim() }
                 }
+                .toolbar {
+                    ToolbarItem(placement: .principal) {
+                        TopBar(tab: $tab, downloading: downloadingCount, showIndexer: tracker.configured,
+                               open: { path = NavigationPath(); path.append($0) })
+                            .opacity(barHidden ? 0 : 1)
+                            .allowsHitTesting(!barHidden)
+                            .animation(.easeInOut(duration: 0.25), value: barHidden)
+                    }
+                }
                 .toolbarBackground(.hidden, for: .windowToolbar)
-            }
         }
-        .searchable(text: $search, placement: .toolbar, prompt: "Films, séries, genres…")
-        .background(SearchShortcut())
-        // fenêtre étroite : la barre latérale se replie d'elle-même (et revient quand on élargit)
-        .background(GeometryReader { g in
-            Color.clear.onChange(of: g.size.width < 900, initial: true) { _, isNarrow in
-                guard isNarrow != narrow else { return }
-                narrow = isNarrow
-                withAnimation(.easeInOut(duration: 0.2)) { columns = isNarrow ? .detailOnly : .all }
-            }
-        })
-        .onChange(of: tab) { _, _ in path = NavigationPath(); search = "" }
-        .onChange(of: search) { old, new in if old.isEmpty != new.isEmpty { path = NavigationPath() } }
+        .background(ScrollDirectionWatcher { down in if barHidden != down { barHidden = down } })
+        // ⌘F : la recherche, d'où qu'on soit
+        .background(Button("") { path = NavigationPath(); tab = .search; SearchFocus.request() }
+            .keyboardShortcut("f", modifiers: .command).hidden())
+        .onChange(of: tab) { _, _ in path = NavigationPath(); barHidden = false }
+        .onChange(of: path) { _, _ in barHidden = false }
         .onChange(of: downloadingCount) { _, n in if n == 0 && tab == .downloads { tab = .home } }
-        .onChange(of: tracker.configured) { _, on in if !on && tab == .indexer { tab = .home } }
         // .torrent ou magnet déposé sur la fenêtre : il apparaît dans la bibliothèque, avec sa fiche si on la trouve
         .onDrop(of: [.fileURL, .url, .text], isTargeted: nil) { DownloadsModel.shared.handleDrop($0) }
         .modifier(ManualAddSheets())
@@ -111,29 +90,26 @@ struct ContentView: View {
             case .tab(let t)?: tab = t
             case .open(let v)?: path.append(v)
             case .back?: if !path.isEmpty { path.removeLast() }
-            case .search(let q)?: search = q
+            case .search(let q)?: tab = .search; search = q
             case .step?: break   // pour la fiche d'épisode
-            case .sidebar(let on)?: columns = on ? .all : .detailOnly
             case nil: break
             }
         }
         .background(BackNavigation { if !path.isEmpty { path.removeLast(); return true }; return false })
     }
 
-    private var query: String { search.trimmingCharacters(in: .whitespaces) }
     private var downloadingCount: Int { downloads.visibleEntries(store: store).filter { !$0.isDone }.count }
 
     @ViewBuilder
     private func page(_ t: TopTab) -> some View {
         switch t {
+        case .search: SearchPage(search: $search)
         case .home: HomeView()
         case .movies: CategoryPage(kind: .movie)
         case .shows: CategoryPage(kind: .tv)
         case .discover: DiscoverView()
         case .downloads: GridPage(title: "En téléchargement", items: [],
                                   downloads: downloads.visibleEntries(store: store).filter { !$0.isDone })
-        case .indexer: TrackerView()
-        case .storage: StorageView()
         }
     }
 
@@ -159,66 +135,97 @@ struct ContentView: View {
 
 }
 
-/// Barre latérale : sections de la bibliothèque, puis Stockage et Réglages en bas.
-private struct Sidebar: View {
+/// La barre du haut, façon tvOS : loupe, onglets, réglages, dans une pastille translucide.
+private struct TopBar: View {
     @Binding var tab: TopTab
     let downloading: Int
     let showIndexer: Bool
+    let open: (String) -> Void
+    @Namespace private var selection
 
     var body: some View {
-        List(selection: Binding(get: { tab }, set: { if let t = $0 { tab = t } })) {
-            Section {
-                ForEach([TopTab.home, .movies, .shows, .discover]) { row($0) }
+        HStack(spacing: 2) {
+            icon("magnifyingglass", .search, help: "Recherche (⌘F)")
+            ForEach([TopTab.home, .movies, .shows, .discover]) { item($0) }
+            if downloading > 0 { item(.downloads, count: downloading) }
+            Menu {
+                SettingsLink { Text("Réglages…") }
+                Button("Stockage") { open("storage") }
+                if showIndexer { Button("Indexeur") { open("tracker") } }
+            } label: {
+                Image(systemName: "gearshape").font(.system(size: 13, weight: .semibold))
+                    .frame(width: 30, height: 26).contentShape(Rectangle())
             }
-            if downloading > 0 || showIndexer {
-                Section("Téléchargements") {
-                    if downloading > 0 { row(.downloads).badge(downloading) }
-                    if showIndexer { row(.indexer) }
+            .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+            .foregroundStyle(.white.opacity(0.85))
+            .help("Réglages, stockage")
+        }
+        .padding(3)
+        .background(.ultraThinMaterial, in: Capsule())
+        .overlay(Capsule().stroke(.white.opacity(0.12), lineWidth: 0.5))
+        .environment(\.colorScheme, .dark)
+        .animation(.spring(response: 0.3, dampingFraction: 0.85), value: tab)
+    }
+
+    private func item(_ t: TopTab, count: Int? = nil) -> some View {
+        Button { tab = t } label: {
+            HStack(spacing: 5) {
+                Text(t.rawValue)
+                if let count {
+                    Text("\(count)").font(.system(size: 10, weight: .bold)).monospacedDigit()
+                        .padding(.horizontal, 5).padding(.vertical, 1)
+                        .background(Theme.accent, in: Capsule()).foregroundStyle(.white)
                 }
             }
-        }
-        .listStyle(.sidebar)
-        .safeAreaInset(edge: .bottom) {
-            VStack(alignment: .leading, spacing: 2) {
-                Divider().padding(.bottom, 6)
-                Button { tab = .storage } label: { footerLabel(TopTab.storage.rawValue, TopTab.storage.icon, selected: tab == .storage) }
-                    .buttonStyle(.plain)
-                SettingsLink { footerLabel("Réglages", "gearshape", selected: false) }
-                    .buttonStyle(.plain)
+            .font(.system(size: 13, weight: tab == t ? .semibold : .medium))
+            .foregroundStyle(tab == t ? Color.black : Color.white.opacity(0.85))
+            .padding(.horizontal, 14).frame(height: 26)
+            .background {
+                if tab == t { Capsule().fill(.white.opacity(0.92)).matchedGeometryEffect(id: "sel", in: selection) }
             }
-            .padding(.horizontal, 10).padding(.bottom, 10)
+            .contentShape(Capsule())
         }
+        .buttonStyle(.plain)
     }
 
-    private func row(_ t: TopTab) -> some View {
-        Label(t.rawValue, systemImage: t.icon).tag(t)
-    }
-
-    private func footerLabel(_ title: String, _ icon: String, selected: Bool) -> some View {
-        Label(title, systemImage: icon)
-            .font(.system(size: 13))
-            .foregroundStyle(selected ? Theme.accentText : .secondary)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 8).padding(.vertical, 5)
-            .contentShape(Rectangle())
+    private func icon(_ name: String, _ t: TopTab, help: String) -> some View {
+        Button { tab = t } label: {
+            Image(systemName: name).font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(tab == t ? Color.black : Color.white.opacity(0.85))
+                .frame(width: 30, height: 26)
+                .background {
+                    if tab == t { Capsule().fill(.white.opacity(0.92)).matchedGeometryEffect(id: "sel", in: selection) }
+                }
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain).help(help)
     }
 }
 
-/// ⌘F place le curseur dans la recherche de la barre d'outils (macOS 15 et plus ; avant, le clic suffit).
-private struct SearchShortcut: View {
-    var body: some View {
-        Button("") {
-            // le champ de recherche de la barre d'outils est un NSSearchField : on lui donne le focus
-            guard let win = NSApp.keyWindow else { return }
-            func find(_ v: NSView) -> NSSearchField? {
-                if let f = v as? NSSearchField, !f.isHiddenOrHasHiddenAncestor { return f }
-                for c in v.subviews { if let f = find(c) { return f } }
-                return nil
-            }
-            if let root = win.contentView?.superview, let f = find(root) { win.makeFirstResponder(f) }
+/// Défilement vers le bas (contenu qui monte) : `true` ; vers le haut : `false`. Molette ou trackpad.
+private struct ScrollDirectionWatcher: NSViewRepresentable {
+    let onChange: (Bool) -> Void
+    func makeNSView(context: Context) -> NSView {
+        let v = NSView()
+        context.coordinator.view = v
+        context.coordinator.monitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak c = context.coordinator] e in
+            guard let c, e.window === c.view?.window, abs(e.scrollingDeltaY) > abs(e.scrollingDeltaX) else { return e }
+            c.accumulated += e.scrollingDeltaY
+            if c.accumulated < -40 { c.accumulated = 0; c.onChange(true) }
+            if c.accumulated > 20 { c.accumulated = 0; c.onChange(false) }
+            return e
         }
-        .keyboardShortcut("f", modifiers: .command)
-        .hidden()
+        context.coordinator.onChange = onChange
+        return v
+    }
+    func updateNSView(_ v: NSView, context: Context) { context.coordinator.onChange = onChange }
+    func makeCoordinator() -> Coordinator { Coordinator() }
+    final class Coordinator {
+        weak var view: NSView?
+        var monitor: Any?
+        var accumulated: CGFloat = 0
+        var onChange: (Bool) -> Void = { _ in }
+        deinit { if let monitor { NSEvent.removeMonitor(monitor) } }
     }
 }
 

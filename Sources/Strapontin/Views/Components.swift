@@ -54,23 +54,62 @@ struct LocalImage: View {
     }
 }
 
-/// Image TMDb distante (logos, photos d'épisodes, acteurs).
+/// Images distantes (TMDb) : gardées décodées en mémoire, et sur disque par le cache HTTP (URLCache agrandi au
+/// lancement) ; une seule requête en vol par adresse. Une affiche déjà vue s'affiche sans attendre.
+@MainActor
+final class RemoteImageLoader {
+    static let shared = RemoteImageLoader()
+    private let cache = NSCache<NSURL, NSImage>()
+    private var inflight: [URL: Task<NSImage?, Never>] = [:]
+
+    init() { cache.countLimit = 400 }
+
+    func cached(_ url: URL) -> NSImage? { cache.object(forKey: url as NSURL) }
+
+    func image(_ url: URL) async -> NSImage? {
+        if let img = cached(url) { return img }
+        if let t = inflight[url] { return await t.value }
+        let t = Task.detached(priority: .userInitiated) { () -> NSImage? in
+            guard let (data, resp) = try? await URLSession.shared.data(from: url),
+                  (resp as? HTTPURLResponse)?.statusCode == 200 else { return nil }
+            return NSImage(data: data)
+        }
+        inflight[url] = t
+        let img = await t.value
+        inflight[url] = nil
+        if let img { cache.setObject(img, forKey: url as NSURL) }
+        return img
+    }
+
+    /// Préchargement (survol d'une affiche, rangée qui apparaît).
+    func prefetch(_ url: URL?) { if let url, cached(url) == nil { Task { _ = await image(url) } } }
+}
+
+/// Image TMDb distante (affiches, fonds, logos, photos d'épisodes, acteurs).
 struct RemoteImage: View {
     let url: URL?
     var contentMode: ContentMode = .fill
+    @State private var image: NSImage?
 
     init(url: URL?, contentMode: ContentMode = .fill) {
         self.url = url
         self.contentMode = contentMode
+        _image = State(initialValue: url.flatMap { RemoteImageLoader.shared.cached($0) })
     }
 
     var body: some View {
-        AsyncImage(url: url, transaction: Transaction(animation: .easeOut(duration: 0.3))) { phase in
-            if case .success(let img) = phase {
-                img.resizable().aspectRatio(contentMode: contentMode)
+        ZStack {
+            if let image {
+                Image(nsImage: image).resizable().aspectRatio(contentMode: contentMode).transition(.opacity)
             } else {
                 Color.clear
             }
+        }
+        .task(id: url) {
+            guard let url else { image = nil; return }
+            if let hit = RemoteImageLoader.shared.cached(url) { image = hit; return }
+            let img = await RemoteImageLoader.shared.image(url)
+            withAnimation(.easeOut(duration: 0.25)) { image = img }
         }
     }
 }
@@ -97,13 +136,7 @@ struct LogoOrTitle: View {
 
     var body: some View {
         if let logo = logoPath {
-            AsyncImage(url: TMDbClient.imageURL(logo, size: "w500"), transaction: Transaction(animation: .easeOut(duration: 0.3))) { phase in
-                switch phase {
-                case .success(let img): img.resizable().aspectRatio(contentMode: .fit)
-                case .failure: text
-                default: text.hidden()
-                }
-            }
+            LogoImage(url: TMDbClient.imageURL(logo, size: "w500"), fallback: text)
             .frame(maxWidth: maxWidth, maxHeight: maxHeight, alignment: .bottomLeading)
             .shadow(color: .black.opacity(0.5), radius: 12)
         } else {
@@ -391,4 +424,96 @@ func play(_ item: LibraryItem, from start: MediaFile? = nil, resume: Bool) {
         PlayItem(file: f, title: item.title, resume: i == 0 ? resume : true)
     }
     PlayerController.play(queue)
+}
+
+/// Logo du titre : l'image si elle se charge, le titre écrit si elle échoue (rien pendant le chargement).
+private struct LogoImage<Fallback: View>: View {
+    let url: URL?
+    let fallback: Fallback
+    @State private var image: NSImage?
+    @State private var failed = false
+
+    init(url: URL?, fallback: Fallback) {
+        self.url = url
+        self.fallback = fallback
+        _image = State(initialValue: url.flatMap { RemoteImageLoader.shared.cached($0) })
+    }
+
+    var body: some View {
+        Group {
+            if let image { Image(nsImage: image).resizable().aspectRatio(contentMode: .fit) }
+            else if failed { fallback }
+            else { fallback.hidden() }
+        }
+        .task(id: url) {
+            guard let url, image == nil else { return }
+            let img = await RemoteImageLoader.shared.image(url)
+            withAnimation(.easeOut(duration: 0.25)) { image = img; failed = img == nil }
+        }
+    }
+}
+
+// MARK: chargement : un seul composant, partout
+
+/// Affiche fantôme qui scintille doucement pendant un chargement (grilles, rangées, fiches).
+struct Skeleton: View {
+    var corner: CGFloat = Theme.corner
+    @State private var phase: CGFloat = -1
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: corner, style: .continuous)
+            .fill(Color.white.opacity(0.06))
+            .overlay {
+                GeometryReader { g in
+                    LinearGradient(colors: [.clear, .white.opacity(0.07), .clear], startPoint: .leading, endPoint: .trailing)
+                        .frame(width: g.size.width * 0.6)
+                        .offset(x: phase * g.size.width * 1.6)
+                }
+                .clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
+            }
+            .onAppear { withAnimation(.linear(duration: 1.3).repeatForever(autoreverses: false)) { phase = 1 } }
+            .accessibilityLabel("Chargement")
+    }
+}
+
+/// Affiche fantôme, avec ses deux lignes de titre.
+struct SkeletonPoster: View {
+    var width: CGFloat = 160
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Skeleton().frame(width: width, height: width * 1.5)
+            Skeleton(corner: 4).frame(width: width * 0.75, height: 11)
+            Skeleton(corner: 4).frame(width: width * 0.45, height: 10)
+        }
+    }
+}
+
+/// Rangée d'affiches fantômes, avec le vrai titre de la rangée : la page a sa forme définitive dès le départ.
+struct SkeletonShelf: View {
+    let title: String
+    var count = 8
+    var body: some View {
+        Shelf(title: title) { ForEach(0..<count, id: \.self) { _ in SkeletonPoster() } }
+            .allowsHitTesting(false)
+    }
+}
+
+/// Section d'une page de résultats : titre, puis contenu, squelette, « aucun résultat » ou erreur discrète.
+struct SectionMessage: View {
+    let title: String
+    let message: String
+    var icon: String? = nil
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title).font(.system(size: 21, weight: .bold))
+            Label {
+                Text(message)
+            } icon: {
+                if let icon { Image(systemName: icon) }
+            }
+            .font(.system(size: 13)).foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, Theme.margin)
+    }
 }

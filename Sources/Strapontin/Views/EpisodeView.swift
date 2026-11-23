@@ -99,7 +99,7 @@ struct EpisodeView: View {
         .background {
             ZStack {
                 LinearGradient(colors: [Color(white: 0.2), Theme.background], startPoint: .top, endPoint: .bottom)
-                Color.clear.overlay { RemoteImage(url: TMDbClient.imageURL(image, size: "original")) }.clipped()
+                Color.clear.overlay { RemoteImage(url: TMDbClient.imageURL(image, size: "w1280")) }.clipped()
                 HeroShade()
             }
         }

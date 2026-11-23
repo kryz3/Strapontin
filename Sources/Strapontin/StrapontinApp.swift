@@ -1,3 +1,4 @@
+import StrapontinCore
 import AppKit
 import SwiftUI
 
@@ -79,6 +80,11 @@ struct StrapontinApp: App {
         if !CommandLine.arguments.contains(where: { ["--selftest", "--analyser", "--vignettes"].contains($0) }) {
             LegacyMigration.runIfNeeded()
         }
+        // caches : réponses TMDb (fiches, recherches) et images, sur disque, dans ~/Library/Caches/Strapontin
+        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("Strapontin")
+        URLCache.shared = URLCache(memoryCapacity: 64 << 20, diskCapacity: 512 << 20,
+                                   directory: caches.appendingPathComponent("Images"))
+        Task { await TMDbCache.shared.setDirectory(caches.appendingPathComponent("TMDb")) }
     }
 
     var body: some Scene {

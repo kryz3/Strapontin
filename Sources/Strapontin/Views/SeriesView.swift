@@ -57,7 +57,7 @@ struct SeriesFicheView: View {
                     } else if item != nil {
                         LocalImage(url: store.backdropURL(m))
                     } else {
-                        RemoteImage(url: TMDbClient.imageURL(m.backdropPath, size: "original"))
+                        RemoteImage(url: TMDbClient.imageURL(m.backdropPath, size: "w1280"))
                     }
                 }
                 .frame(width: geo.size.width, height: geo.size.height).clipped()

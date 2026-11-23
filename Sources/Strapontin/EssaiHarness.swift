@@ -43,7 +43,7 @@ final class EssaiHarness: ObservableObject {
         }
     }
 
-    enum Command: Equatable { case tab(TopTab), open(String), back, search(String), step(Int), sidebar(Bool) }
+    enum Command: Equatable { case tab(TopTab), open(String), back, search(String), step(Int) }
     @Published var command: Command?
     @Published private(set) var serial = 0
 
@@ -60,11 +60,10 @@ final class EssaiHarness: ObservableObject {
         switch verb {
         case "tab":
             let map: [String: TopTab] = ["home": .home, "movies": .movies, "shows": .shows, "discover": .discover,
-                                         "downloads": .downloads, "indexer": .indexer, "storage": .storage]
+                                         "downloads": .downloads, "search": .search]
             if let t = map[arg] { send(.tab(t)) }
         case "open": send(.open(arg))
         case "back": send(.back)
-        case "sidebar": send(.sidebar(arg != "off"))
         case "search": send(.search(arg))
         case "snap": snapshot(to: arg)
         case "dump-search":
@@ -88,6 +87,8 @@ final class EssaiHarness: ObservableObject {
             if verb == "attach" { DownloadsModel.shared.assign(hash: p[0], kind: k, tmdbId: id) }
             else if let item = LibraryStore.shared.item(id: p[0]) { Task { await LibraryStore.shared.assign(item, kind: k, tmdbId: id) } }
         case "cancel": DownloadsModel.shared.cancel([arg], deleteFiles: true)
+        case "pause": DownloadsModel.shared.pause([arg])
+        case "resume": DownloadsModel.shared.resume([arg])
         case "attach-episode":
             let p = arg.split(separator: "|").map(String.init)
             guard p.count == 4, let id = Int(p[1]), let s = Int(p[2]), let e = Int(p[3]) else { return }

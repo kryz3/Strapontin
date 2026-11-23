@@ -14,6 +14,17 @@ enum MediaDeleter {
     /// Renvoie la place libérée (en octets).
     @discardableResult
     static func delete(_ files: [MediaFile], permanently: Bool) async throws -> Int64 {
+        // interface optimiste : le titre ou l'épisode disparaît tout de suite ; il revient si la suppression échoue
+        await LibraryStore.shared.hide(files.map(\.path))
+        do {
+            return try await deleteNow(files, permanently: permanently)
+        } catch {
+            await LibraryStore.shared.unhide(files.map(\.path))
+            throw error
+        }
+    }
+
+    private static func deleteNow(_ files: [MediaFile], permanently: Bool) async throws -> Int64 {
         let fm = FileManager.default
         let paths = Set(files.map(\.path))
         let targets = targets(for: files.map(\.path), roots: AppSettings.shared.folders)

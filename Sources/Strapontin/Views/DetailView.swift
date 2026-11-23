@@ -388,7 +388,8 @@ struct MatchSheet: View {
                 Button("Choisir") {
                     guard let id = selection else { return }
                     let k = kind
-                    Task { await store.assign(item, kind: k, tmdbId: id) }
+                    let preview = results.first { $0.id == id }
+                    Task { await store.assign(item, kind: k, tmdbId: id, preview: preview) }
                     dismiss()
                 }
                 .buttonStyle(.borderedProminent)

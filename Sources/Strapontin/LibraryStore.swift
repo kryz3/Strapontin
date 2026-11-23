@@ -59,8 +59,16 @@ final class LibraryStore: ObservableObject {
         }
     }
 
+    /// Supprimés à l'instant : retirés de l'affichage avant même la fin de la suppression (rendus si elle échoue).
+    private var hiddenPaths: Set<String> = []
+
+    func hide(_ paths: [String]) { hiddenPaths.formUnion(paths); rebuild() }
+    func unhide(_ paths: [String]) { hiddenPaths.subtract(paths); rebuild() }
+
     private func rebuild() {
-        let new = LibraryItem.build(files: files, media: media)
+        hiddenPaths = hiddenPaths.filter { p in files.contains { $0.path == p } }
+        let new = LibraryItem.build(files: hiddenPaths.isEmpty ? files : files.filter { !hiddenPaths.contains($0.path) }, media: media)
+        if !new.isEmpty { Perf.once("bibliothèque affichée (depuis le lancement)") }
         // une entrée qui change d'id (fiche corrigée, enfin identifiée) : les pages ouvertes la suivent
         let moved = LibraryItem.redirects(from: items, to: new)
         if !moved.isEmpty {
@@ -171,8 +179,47 @@ final class LibraryStore: ObservableObject {
         guard let client = tmdb() else { return }
         let pending = files.filter { $0.matchState == .pending }
         guard !pending.isEmpty else { return }
+        let t0 = ContinuousClock.now
+        defer {
+            Perf.log("identification de \(pending.count) fichiers", since: t0)
+            Perf.once("bibliothèque identifiée (depuis le lancement)")
+        }
         var cache: [String: String?] = [:]          // recherche -> clé de fiche
         var seasons: [String: [Int: EpisodeInfo]] = [:]  // "tvId:saison" -> épisodes
+        // les fiches distinctes sont cherchées en parallèle (4 à la fois) : 16 films ne font plus 16 allers-retours
+        // à la suite ; le rangement des fichiers se fait ensuite, dans l'ordre
+        var queries: [String: (MediaKind, String, Int?)] = [:]
+        for f in pending where DownloadsModel.shared.origin(of: f.path) == nil {
+            let q = "\(f.kind.rawValue)|\(f.guessTitle.lowercased())|\(f.isEpisode ? 0 : (f.guessYear ?? 0))"
+            if queries[q] == nil { queries[q] = (f.kind, f.guessTitle, f.guessYear) }
+        }
+        var fatal: TMDbError?
+        status = "Identification de \(pending.count) fichier\(pending.count > 1 ? "s" : "")…"
+        let all = Array(queries)
+        var done = 0
+        for start in stride(from: 0, to: all.count, by: 4) where fatal == nil {
+            let chunk = all[start..<min(start + 4, all.count)]
+            let found = await withTaskGroup(of: (String, String??, TMDbError?).self) { group -> [(String, String??, TMDbError?)] in
+                for (q, (kind, title, year)) in chunk {
+                    group.addTask {
+                        do { return (q, .some(try await self.findMedia(client, kind: kind, title: title, year: year)), nil) }
+                        catch let e as TMDbError { return (q, nil, e) }
+                        catch { return (q, nil, nil) }   // réseau coupé : on réessaiera au prochain scan
+                    }
+                }
+                var out: [(String, String??, TMDbError?)] = []
+                for await r in group { out.append(r) }
+                return out
+            }
+            for (q, key, err) in found {
+                if let key { cache[q] = key }
+                if let err { fatal = err }
+            }
+            done += chunk.count
+            status = "Identification \(done)/\(all.count)"
+            rebuild()
+        }
+        if let fatal { status = fatal.localizedDescription }
         for (n, f) in pending.enumerated() {
             status = "Identification \(n + 1)/\(pending.count) : \(f.guessTitle)"
             // vient d'un téléchargement rattaché : sa fiche et son épisode, sans passer un instant par une fiche devinée
@@ -242,10 +289,34 @@ final class LibraryStore: ObservableObject {
     }
 
     /// Correction manuelle : rattache tous les fichiers d'une entrée à une fiche choisie.
-    func assign(_ item: LibraryItem, kind: MediaKind, tmdbId: Int) async {
+    /// Correction d'une fiche. Interface optimiste : la page bascule tout de suite sur la fiche choisie (titre, année,
+    /// affiche du résultat de recherche), la fiche complète arrive ensuite ; si TMDb échoue, tout revient comme avant.
+    func assign(_ item: LibraryItem, kind: MediaKind, tmdbId: Int, preview: TMDbSearchResult? = nil) async {
         guard let client = tmdb() else { return }
+        let t0 = ContinuousClock.now
+        let key = Media.key(kind, tmdbId)
+        let before = item.files.compactMap { f in files.firstIndex(where: { $0.path == f.path }).map { (f.path, files[$0].mediaKey, files[$0].matchState) } }
+        let hadMedia = media[key] != nil
+        if !hadMedia, let p = preview {
+            var m = Media(tmdbId: tmdbId, kind: kind, title: p.title)
+            m.year = p.year
+            m.overview = p.overview
+            m.posterPath = p.posterPath
+            media[key] = m
+            Task { _ = await client.downloadImage(p.posterPath, size: "w500", to: posterURL(m)); rebuild() }
+        }
+        if media[key] != nil {
+            for f in item.files {
+                guard let idx = files.firstIndex(where: { $0.path == f.path }) else { continue }
+                files[idx].mediaKey = key
+                files[idx].matchState = .manual
+            }
+            rebuild()
+            Perf.log("correction de fiche : affiché", since: t0)
+        }
         status = "Récupération de la fiche…"
         do {
+            if !hadMedia { media[key] = nil }   // fiche provisoire : remplacée par la complète
             let key = try await storeMedia(client, kind: kind, id: tmdbId)
             var seasons: [Int: [Int: EpisodeInfo]] = [:]
             for f in item.files {
@@ -261,8 +332,17 @@ final class LibraryStore: ObservableObject {
             rebuild()
             save()
             status = ""
+            Perf.log("correction de fiche : fiche complète", since: t0)
         } catch {
-            status = error.localizedDescription
+            // retour en arrière : l'ancienne fiche, et un message discret
+            for (path, oldKey, oldState) in before {
+                guard let idx = files.firstIndex(where: { $0.path == path }) else { continue }
+                files[idx].mediaKey = oldKey
+                files[idx].matchState = oldState
+            }
+            if !hadMedia { media[key] = nil }
+            rebuild()
+            status = "Fiche non modifiée : \(error.localizedDescription)"
         }
     }
 

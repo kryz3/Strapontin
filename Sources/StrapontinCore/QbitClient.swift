@@ -25,6 +25,12 @@ public struct Torrent: Identifiable, Hashable, Sendable {
     public var contentPath: String
     public var addedOn: Double
 
+    public init(hash: String, name: String, progress: Double, state: String, dlspeed: Int64, eta: Int64, size: Int64,
+                savePath: String, contentPath: String, addedOn: Double) {
+        self.hash = hash; self.name = name; self.progress = progress; self.state = state; self.dlspeed = dlspeed
+        self.eta = eta; self.size = size; self.savePath = savePath; self.contentPath = contentPath; self.addedOn = addedOn
+    }
+
     public var isDone: Bool {
         progress >= 1 && ["uploading", "stalledUP", "pausedUP", "stoppedUP", "queuedUP", "forcedUP"].contains(state)
     }

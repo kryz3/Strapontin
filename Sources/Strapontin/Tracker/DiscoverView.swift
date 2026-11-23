@@ -78,6 +78,9 @@ struct DiscoverView: View {
                     .padding(.horizontal, Theme.margin)
                 if let error { Text(error).foregroundStyle(.orange).padding(.horizontal, Theme.margin) }
                 TMDbShelf(title: "Suivis", results: followed)
+                if rows.isEmpty && error == nil {
+                    ForEach(["Films tendance", "Séries tendance", "Films populaires"], id: \.self) { SkeletonShelf(title: $0) }
+                }
                 ForEach(rows, id: \.0) { title, items in
                     TMDbShelf(title: title, results: items)
                 }
@@ -88,6 +91,8 @@ struct DiscoverView: View {
         .ignoresSafeArea(edges: .top)
         .task {
             guard rows.isEmpty, let c = tmdbClient() else { return }
+            let t0 = ContinuousClock.now
+            defer { Perf.log("découvrir", since: t0) }
             do {
                 async let tm = c.trending(.movie)
                 async let tt = c.trending(.tv)
@@ -102,32 +107,79 @@ struct DiscoverView: View {
     }
 }
 
-/// Résultats de la recherche de la barre d'outils, d'où qu'elle soit lancée : ce qu'on a déjà (bibliothèque,
-/// téléchargements), puis le catalogue TMDb en affiches avec les pastilles de l'indexeur.
-struct SearchResultsView: View {
-    let query: String
+/// ⌘F (ou la loupe) : demande le curseur dans le champ de la page Recherche.
+enum SearchFocus {
+    static let name = Notification.Name("strapontin.search.focus")
+    static func request() {
+        // après le changement d'onglet : la page doit exister pour recevoir la demande
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { NotificationCenter.default.post(name: name, object: nil) }
+    }
+}
+
+/// Page Recherche, façon tvOS : un grand champ en haut (le seul de l'app), puis ce qu'on a déjà (bibliothèque,
+/// téléchargements) et tout le catalogue TMDb en affiches, avec les pastilles de l'indexeur. Le texte est gardé par
+/// ContentView : on retrouve ses résultats en revenant d'une fiche.
+struct SearchPage: View {
+    @Binding var search: String
     @EnvironmentObject var store: LibraryStore
     @ObservedObject private var downloads = DownloadsModel.shared
+    @FocusState private var focused: Bool
+
+    private var query: String { search.trimmingCharacters(in: .whitespaces) }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 36) {
-                Text("Résultats pour « \(query) »").font(.system(size: 30, weight: .bold))
-                    .padding(.horizontal, Theme.margin)
-                let mine = LibrarySearch.items(store, query)
-                let dls = LibrarySearch.downloads(downloads, store, query)
-                if !mine.isEmpty || !dls.isEmpty {
-                    Shelf(title: "Dans ta bibliothèque") {
-                        ForEach(dls) { DownloadPosterCard(entry: $0) }
-                        ForEach(mine) { PosterCard(item: $0) }
-                    }
+                field.padding(.horizontal, Theme.margin)
+                if query.isEmpty {
+                    Text("Cherche un film, une série, un acteur ou un genre : dans ta bibliothèque et dans tout le catalogue.")
+                        .foregroundStyle(.secondary).padding(.horizontal, Theme.margin)
+                } else {
+                    libraryResults
+                    TMDbSearchSections(query: query)
                 }
-                TMDbSearchShelf(query: query, grid: true)
             }
-            .padding(.top, 70)
+            .padding(.top, 76)
             .padding(.bottom, 40)
         }
         .ignoresSafeArea(edges: .top)
+        .onAppear { if query.isEmpty { focused = true } }
+        .onReceive(NotificationCenter.default.publisher(for: SearchFocus.name)) { _ in focused = true }
+    }
+
+    @ViewBuilder private var libraryResults: some View {
+        let mine = LibrarySearch.items(store, query)
+        let dls = LibrarySearch.downloads(downloads, store, query)
+        if !mine.isEmpty || !dls.isEmpty {
+            Shelf(title: "Dans ta bibliothèque") {
+                ForEach(dls) { DownloadPosterCard(entry: $0) }
+                ForEach(mine) { PosterCard(item: $0) }
+            }
+        } else {
+            SectionMessage(title: "Dans ta bibliothèque", message: "Aucun résultat dans ta bibliothèque.")
+        }
+    }
+
+    /// Grand champ arrondi, comme la recherche de l'app TV.
+    private var field: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "magnifyingglass").font(.system(size: 19, weight: .semibold)).foregroundStyle(.secondary)
+            TextField("Films, séries, acteurs, genres…", text: $search)
+                .textFieldStyle(.plain).font(.system(size: 20, weight: .medium))
+                .focused($focused)
+                .onExitCommand { search = ""; focused = false }
+            if !search.isEmpty {
+                Button { search = "" } label: { Image(systemName: "xmark.circle.fill").font(.system(size: 17)) }
+                    .buttonStyle(.plain).foregroundStyle(.secondary).help("Effacer")
+            }
+        }
+        .padding(.horizontal, 20).padding(.vertical, 15)
+        .frame(maxWidth: 720)
+        .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(.white.opacity(focused ? 0.12 : 0.08)))
+        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(focused ? Theme.accentText.opacity(0.6) : .white.opacity(0.1), lineWidth: 1))
+        .contentShape(Rectangle())
+        .onTapGesture { focused = true }
+        .animation(.easeOut(duration: 0.15), value: focused)
     }
 }
 
@@ -170,45 +222,94 @@ enum LibrarySearch {
     }
 }
 
-/// Rangée de résultats TMDb à ajouter sous les résultats de la recherche de la bibliothèque.
-struct TMDbSearchShelf: View {
+/// Résultats TMDb de la recherche : une section Films et une section Séries, affichées tout de suite (squelettes),
+/// remplies chacune dès que sa réponse arrive ; puis les pastilles de l'indexeur, sans bloquer les affiches.
+/// Saisie « calmée » (300 ms) et requêtes annulées quand le texte change : une ancienne réponse n'écrase jamais
+/// la nouvelle.
+struct TMDbSearchSections: View {
     let query: String
-    /// Découvrir : grille d'affiches plutôt qu'une rangée.
-    var grid = false
     @EnvironmentObject var store: LibraryStore
-    @State private var results: [TMDbSearchResult] = []
-    /// Nombre de versions sur l'indexeur par fiche non possédée (absent = pas encore vérifié).
-    @State private var availability: [String: Int] = [:]
-    @State private var searchedFor = ""
     @ObservedObject private var tracker = TrackerModel.shared
 
+    enum Phase: Equatable { case loading, done([TMDbSearchResult]), failed(String) }
+    @State private var phases: [MediaKind: Phase] = [.movie: .loading, .tv: .loading]
+    @State private var availability: [String: Int] = [:]
+    @State private var checking = false
+
     var body: some View {
-        // conteneur toujours présent : sur la seule TMDbShelf (vide tant qu'il n'y a pas de résultats),
-        // la tâche ne démarrait jamais et la rangée n'apparaissait pas
-        VStack(alignment: .leading) {
-            // ce que la fiche a compté fait foi (une fiche ouverte puis refermée met la pastille à jour)
-            TMDbShelf(title: "Films et séries", results: results, grid: grid,
-                      availability: availability.isEmpty ? availability : availability.merging(tracker.availabilityById) { _, f in f })
-            if results.isEmpty, searchedFor == query, query.count >= 2 {
-                Text("Rien trouvé pour « \(query) ». Vérifie l'orthographe, ou essaie le titre original.")
-                    .foregroundStyle(.secondary).padding(.horizontal, Theme.margin)
+        VStack(alignment: .leading, spacing: 36) {
+            section(.movie, title: "Films")
+            section(.tv, title: "Séries")
+        }
+        // une tâche par texte cherché : la précédente est annulée, et une réponse n'est appliquée que si elle
+        // correspond encore au texte affiché
+        .onChange(of: query, initial: true) { _, q in
+            job?.cancel()
+            job = Task { await run(q) }
+        }
+        .onDisappear { job?.cancel() }
+    }
+
+    @State private var job: Task<Void, Never>?
+
+    @ViewBuilder private func section(_ kind: MediaKind, title: String) -> some View {
+        switch phases[kind] ?? .loading {
+        case .loading:
+            SkeletonShelf(title: title)
+        case .failed(let message):
+            SectionMessage(title: title, message: message, icon: "exclamationmark.triangle")
+        case .done(let results) where results.isEmpty:
+            SectionMessage(title: title, message: kind == .movie ? "Aucun film trouvé." : "Aucune série trouvée.")
+        case .done(let results):
+            VStack(alignment: .leading, spacing: 0) {
+                TMDbShelf(title: title, results: results,
+                          availability: availability.isEmpty ? nil : availability.merging(tracker.availabilityById) { _, f in f })
+                if checking {
+                    Label("Vérification sur l'indexeur…", systemImage: "antenna.radiowaves.left.and.right")
+                        .font(.system(size: 11)).foregroundStyle(.secondary)
+                        .padding(.horizontal, Theme.margin).padding(.top, 6)
+                }
             }
         }
-            .frame(maxWidth: .infinity, minHeight: 1, alignment: .leading)
-            .task(id: query) {
-                try? await Task.sleep(nanoseconds: 400_000_000)   // on attend que la frappe se calme
-                guard !Task.isCancelled, query.count >= 2, let c = tmdbClient() else { results = []; availability = [:]; return }
-                async let m = c.search(.movie, title: query, year: nil)
-                async let t = c.search(.tv, title: query, year: nil)
-                let all = ((try? await m) ?? []) + ((try? await t) ?? [])
-                guard !Task.isCancelled else { return }
-                results = LibrarySearch.rank(all, query)
-                searchedFor = query
-                availability = [:]
-                let notOwned = all.filter { store.media[Media.key($0.kind, $0.id)] == nil }
-                let counts = await TrackerModel.shared.availability(query: query, for: notOwned)
-                if !Task.isCancelled { availability = counts }
-            }
+    }
+
+    private func load(_ kind: MediaKind, client c: TMDbClient, query: String, since t0: ContinuousClock.Instant) async -> [TMDbSearchResult] {
+        do {
+            let list = try await c.search(kind, title: query, year: nil)
+            guard !Task.isCancelled, query == self.query else { return [] }
+            withAnimation(.easeOut(duration: 0.2)) { phases[kind] = .done(LibrarySearch.rank(list, query)) }
+            Perf.log("recherche TMDb \(kind == .movie ? "films" : "séries") « \(query) »", since: t0)
+            return list
+        } catch {
+            guard !Task.isCancelled, query == self.query else { return [] }
+            phases[kind] = .failed("TMDb ne répond pas (\(error.localizedDescription)).")
+            return []
+        }
+    }
+
+    private func run(_ query: String) async {
+        phases = [.movie: .loading, .tv: .loading]
+        availability = [:]
+        checking = false
+        try? await Task.sleep(nanoseconds: 300_000_000)   // on attend que la frappe se calme
+        guard !Task.isCancelled else { return }
+        guard query.count >= 2 else { phases = [.movie: .done([]), .tv: .done([])]; return }
+        guard let c = tmdbClient() else {
+            phases = [.movie: .failed("Ajoute une clé TMDb dans les réglages."), .tv: .failed("Ajoute une clé TMDb dans les réglages.")]
+            return
+        }
+        let t0 = ContinuousClock.now
+        // films et séries en parallèle ; chaque section s'affiche dès que sa propre réponse arrive
+        async let movies = load(.movie, client: c, query: query, since: t0)
+        async let shows = load(.tv, client: c, query: query, since: t0)
+        let all = await movies + shows
+        guard !Task.isCancelled, query == self.query, tracker.configured else { return }
+        let notOwned = all.filter { store.media[Media.key($0.kind, $0.id)] == nil }
+        guard !notOwned.isEmpty else { return }
+        checking = true
+        let counts = await tracker.availability(query: query, for: notOwned)
+        guard !Task.isCancelled else { return }
+        withAnimation { availability = counts; checking = false }
     }
 }
 
@@ -293,7 +394,18 @@ struct TMDbPosterCard: View {
             .frame(width: 160)
         }
         .buttonStyle(.plain)
-        .onHover { h in withAnimation(.easeOut(duration: 0.18)) { hover = h } }
+        .onHover { h in
+            withAnimation(.easeOut(duration: 0.18)) { hover = h }
+            // survol : la fiche et son grand visuel sont chargés d'avance, l'ouverture est immédiate
+            if h, !owned, let c = tmdbClient() {
+                let kind = result.kind, id = result.id
+                Task.detached(priority: .utility) {
+                    if let m = try? await c.details(kind, id: id) {
+                        await RemoteImageLoader.shared.prefetch(TMDbClient.imageURL(m.backdropPath, size: "w1280"))
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -332,16 +444,18 @@ struct PreviewDetailView: View {
                     ContentUnavailableView("Fiche indisponible", systemImage: "exclamationmark.triangle", description: Text(error))
                         .padding(.top, 120)
                 } else {
-                    ProgressView().frame(maxWidth: .infinity).padding(.top, 200)
+                    FicheSkeleton()
                 }
             }
             .ignoresSafeArea(edges: .top)
             .background(Theme.background)
             .task {
                 guard media == nil, let c = tmdbClient() else { return }
+                let t0 = ContinuousClock.now
                 do {
                     let m = try await c.details(kind, id: tmdbId)
                     media = m
+                    Perf.log("fiche \(kind.rawValue):\(tmdbId)", since: t0)
                     await loadVersions(m)
                 } catch { self.error = error.localizedDescription }
             }
@@ -354,7 +468,7 @@ struct PreviewDetailView: View {
         GeometryReader { geo in
             ZStack(alignment: .bottomLeading) {
                 if m.backdropPath != nil {
-                    RemoteImage(url: TMDbClient.imageURL(m.backdropPath, size: "original"))
+                    RemoteImage(url: TMDbClient.imageURL(m.backdropPath, size: "w1280"))
                         .frame(width: geo.size.width, height: geo.size.height).clipped()
                 } else {
                     LinearGradient(colors: [Color(white: 0.2), Theme.background], startPoint: .top, endPoint: .bottom)
@@ -639,5 +753,24 @@ struct TrackerResultsSheet: View {
             do { versions = try await tracker.versions(for: media) } catch { tracker.error = error.localizedDescription }
             loading = false
         }
+    }
+}
+
+/// Fiche en cours de chargement : la forme de la page (grand visuel, titre, boutons), sans sablier.
+struct FicheSkeleton: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Skeleton(corner: 0).frame(height: 520)
+            VStack(alignment: .leading, spacing: 12) {
+                Skeleton(corner: 6).frame(width: 340, height: 34)
+                Skeleton(corner: 4).frame(width: 260, height: 12)
+                HStack(spacing: 12) {
+                    Skeleton(corner: 20).frame(width: 110, height: 40)
+                    Skeleton(corner: 20).frame(width: 40, height: 40)
+                }
+            }
+            .padding(.horizontal, Theme.margin)
+        }
+        .allowsHitTesting(false)
     }
 }
