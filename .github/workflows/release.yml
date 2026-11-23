@@ -1,0 +1,65 @@
+name: Release
+
+# Pousser un tag vX.Y.Z publie une release : Strapontin-X.Y.Z.dmg, Strapontin-X.Y.Z.zip (mise à jour Sparkle) et appcast.xml.
+# Secrets du dépôt : SPARKLE_PRIVATE_KEY (obligatoire, clé EdDSA des mises à jour) et TMDB_API_KEY (facultatif).
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # numéro de build = nombre de commits
+
+      - name: Dépendances
+        run: brew install mpv dylibbundler pkg-config transmission-cli molten-vk
+
+      - name: Tests
+        run: swift test
+
+      - name: Version
+        run: |
+          echo "STRAPONTIN_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+          echo "STRAPONTIN_BUILD=$(git rev-list --count HEAD)" >> "$GITHUB_ENV"
+
+      - name: Construire Strapontin.app
+        env:
+          TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
+        run: ./scripts/bundle.sh
+
+      - name: Vérifier l'app
+        run: |
+          ffmpeg -loglevel error -f lavfi -i testsrc2=size=1280x720:rate=24 -t 4 -c:v libx265 -y /tmp/test.mkv
+          DYLD_FALLBACK_LIBRARY_PATH=/usr/lib build/Strapontin.app/Contents/MacOS/Strapontin --selftest /tmp/test.mkv
+          codesign --verify --deep --strict build/Strapontin.app
+          # une release publique ne contient jamais d'indexeur (ni adresse ni clé)
+          ! /usr/libexec/PlistBuddy -c Print build/Strapontin.app/Contents/Info.plist | grep -q StrapontinIndexer
+
+      - name: Signer la mise à jour et écrire l'appcast
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          V="$STRAPONTIN_VERSION"
+          mv build/Strapontin.zip "build/Strapontin-$V.zip"
+          mv build/Strapontin.dmg "build/Strapontin-$V.dmg"
+          KEY="$RUNNER_TEMP/sparkle-key"
+          (umask 077; printf '%s' "$SPARKLE_PRIVATE_KEY" > "$KEY")
+          ./scripts/appcast.sh "build/Strapontin-$V.zip" "$V" "$STRAPONTIN_BUILD" \
+            "https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME/Strapontin-$V.zip" "$KEY"
+          rm -f "$KEY"
+
+      - name: Publier
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          V="$STRAPONTIN_VERSION"
+          # notes : la section de CHANGELOG.md pour cette version
+          awk -v v="$V" '$0 ~ "^## \\[?"v"\\]?" {on=1; next} /^## / && on {exit} on' CHANGELOG.md > build/notes.md
+          gh release create "$GITHUB_REF_NAME" "build/Strapontin-$V.dmg" "build/Strapontin-$V.zip" build/appcast.xml \
+            --title "Strapontin $V" --notes-file build/notes.md
