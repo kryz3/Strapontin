@@ -139,11 +139,20 @@ enum LibrarySearch {
     static func items(_ store: LibraryStore, _ query: String) -> [LibraryItem] {
         let q = fold(query.trimmingCharacters(in: .whitespaces))
         guard !q.isEmpty else { return [] }
-        return store.items.filter { i in
-            fold([i.title, i.media?.originalTitle ?? "", i.media?.genres.joined(separator: " ") ?? "",
-                  i.year.map(String.init) ?? "", i.media?.cast?.prefix(5).map(\.name).joined(separator: " ") ?? ""]
-                .joined(separator: " ")).contains(q)
+        return store.items.filter { fold(searchText($0)).contains(q) }
+    }
+
+    /// Texte cherché pour une entrée : titres, genres, année, premiers acteurs.
+    private static func searchText(_ i: LibraryItem) -> String {
+        var parts: [String] = [i.title]
+        if let m = i.media {
+            parts.append(m.originalTitle ?? "")
+            parts.append(m.genres.joined(separator: " "))
+            let cast: [String] = (m.cast ?? []).prefix(5).map { $0.name }
+            parts.append(cast.joined(separator: " "))
         }
+        if let y = i.year { parts.append(String(y)) }
+        return parts.joined(separator: " ")
     }
 
     static func rank(_ results: [TMDbSearchResult], _ query: String) -> [TMDbSearchResult] { CatalogSearch.rank(results, query) }
@@ -152,9 +161,11 @@ enum LibrarySearch {
     static func downloads(_ downloads: DownloadsModel, _ store: LibraryStore, _ query: String) -> [DownloadEntry] {
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
         guard !q.isEmpty else { return [] }
+        let folded = fold(q)
         return downloads.visibleEntries(store: store).filter { e in
-            (e.mediaKey.map { store.item(id: $0) == nil } ?? true)
-                && fold([e.title, e.media?.originalTitle ?? "", e.torrents.first?.name ?? ""].joined(separator: " ")).contains(fold(q))
+            if let key = e.mediaKey, store.item(id: key) != nil { return false }
+            let text: String = [e.title, e.media?.originalTitle ?? "", e.torrents.first?.name ?? ""].joined(separator: " ")
+            return fold(text).contains(folded)
         }
     }
 }
