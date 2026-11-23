@@ -1,0 +1,164 @@
+import StrapontinCore
+import SwiftUI
+
+struct SettingsView: View {
+    var body: some View {
+        TabView {
+            LibrarySettings().tabItem { Label("Bibliothèque", systemImage: "folder") }
+            MetadataSettings().tabItem { Label("Fiches", systemImage: "info.square") }
+            PlaybackSettings().tabItem { Label("Lecture", systemImage: "play.rectangle") }
+            QbitSettings().tabItem { Label("Téléchargements", systemImage: "arrow.down.circle") }
+            TrackerSettings().tabItem { Label("Indexeur", systemImage: "magnifyingglass") }
+        }
+        .frame(width: 560, height: 600)
+    }
+}
+
+private struct LibrarySettings: View {
+    @EnvironmentObject var settings: AppSettings
+    @EnvironmentObject var store: LibraryStore
+    @State private var selection: String?
+
+    var body: some View {
+        Form {
+            Section {
+                List(settings.folders, id: \.self, selection: $selection) { f in
+                    Label(f, systemImage: "folder").lineLimit(1).truncationMode(.middle)
+                }
+                .frame(height: 150)
+                HStack {
+                    Button("Ajouter…") {
+                        let p = NSOpenPanel()
+                        p.canChooseDirectories = true
+                        p.canChooseFiles = false
+                        if p.runModal() == .OK, let u = p.url { store.addFolder(u.path) }
+                    }
+                    Button("Retirer") { if let s = selection { store.removeFolder(s) } }.disabled(selection == nil)
+                }
+            } header: {
+                Text("Dossiers surveillés")
+            } footer: {
+                Text("Les nouveaux fichiers apparaissent tout seuls. Un rescan complet tourne aussi régulièrement.")
+                    .foregroundStyle(.secondary)
+            }
+            Picker("Rescan complet", selection: $settings.rescanMinutes) {
+                Text("Jamais").tag(0)
+                Text("Toutes les 5 min").tag(5)
+                Text("Toutes les 15 min").tag(15)
+                Text("Toutes les heures").tag(60)
+            }
+            .onChange(of: settings.rescanMinutes) { _, _ in store.foldersChanged() }
+            UpdateSettingsSection()
+        }
+        .formStyle(.grouped)
+    }
+}
+
+private struct MetadataSettings: View {
+    @EnvironmentObject var settings: AppSettings
+    @EnvironmentObject var store: LibraryStore
+    @State private var test: String?
+
+    var body: some View {
+        Form {
+            Section {
+                SecureField("Clé TMDb", text: $settings.tmdbKey,
+                            prompt: Text(Secrets.tmdbKey.isEmpty ? "Obligatoire (gratuite sur themoviedb.org)" : "Clé fournie avec l'app"))
+                Picker("Langue des fiches", selection: $settings.tmdbLanguage) {
+                    Text("Français").tag("fr-FR")
+                    Text("Français (Canada)").tag("fr-CA")
+                    Text("Anglais").tag("en-US")
+                }
+                SecureField("Clé OMDb (note IMDb, facultatif)", text: $settings.omdbKey)
+                HStack {
+                    Button("Tester la clé") {
+                        let c = TMDbClient(key: settings.effectiveTMDbKey, language: settings.tmdbLanguage)
+                        Task {
+                            do { try await c.check(); test = "✓ Clé valide" } catch { test = error.localizedDescription }
+                        }
+                    }
+                    Button("Ré-identifier les non trouvés") { store.rescan(retryNotFound: true) }
+                    if let test { Text(test).foregroundStyle(.secondary) }
+                }
+            } footer: {
+                Text("Les fiches viennent de TMDb, qui fournit aussi le lien IMDb. Une clé saisie ici remplace celle fournie avec l'app. IMDb n'a pas d'API publique : la note IMDb passe par OMDb (clé gratuite sur omdbapi.com).")
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+    }
+}
+
+private struct PlaybackSettings: View {
+    @EnvironmentObject var settings: AppSettings
+
+    var body: some View {
+        Form {
+            Section {
+                Toggle("Enchaîner l'épisode suivant", isOn: $settings.autoplayNext)
+                Toggle("Repérer les intros et génériques au son", isOn: $settings.detectIntros)
+                    .onChange(of: settings.detectIntros) { _, _ in IntroAnalyzer.shared.schedule() }
+            } header: {
+                Text("Séries")
+            } footer: {
+                Text("Les chapitres du fichier passent d'abord. Sinon Strapontin compare le son des épisodes d'une même saison, en arrière-plan, sur ce Mac.")
+                    .foregroundStyle(.secondary)
+            }
+            Section {
+                Picker("Décodage", selection: $settings.hwdec) {
+                    Text("Matériel si fiable (recommandé)").tag("auto-safe")
+                    Text("Matériel (VideoToolbox)").tag("videotoolbox")
+                    Text("Logiciel uniquement").tag("no")
+                }
+                Toggle("Mise à l'échelle haute qualité", isOn: $settings.highQuality)
+                Toggle("Audio en passthrough vers l'ampli (TrueHD, DTS-HD…)", isOn: $settings.passthrough)
+                TextField("Langues audio préférées", text: $settings.audioLangs)
+                TextField("Langues de sous-titres", text: $settings.subLangs)
+            } footer: {
+                Text("Lecture directe par mpv : le fichier est décodé tel quel, sans transcodage ni recompression. Les réglages s'appliquent à la prochaine vidéo ouverte.")
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+    }
+}
+
+private struct QbitSettings: View {
+    @EnvironmentObject var settings: AppSettings
+    @EnvironmentObject var store: LibraryStore
+    @State private var test: String?
+
+    /// Onglet « Téléchargements » : choix du moteur ; ces champs ne servent que pour « Mon qBittorrent ».
+    var body: some View {
+        EngineSettings {
+            Section {
+                Toggle("Brancher qBittorrent", isOn: $settings.qbitEnabled)
+                TextField("Adresse", text: $settings.qbitURL)
+                TextField("Utilisateur", text: $settings.qbitUser)
+                SecureField("Mot de passe", text: $settings.qbitPassword)
+                HStack {
+                    Button("Tester") {
+                        let c = QbitClient(url: settings.qbitURL, username: settings.qbitUser, password: settings.qbitPassword)
+                        Task {
+                            do { test = "✓ qBittorrent \(try await c.version())" } catch { test = error.localizedDescription }
+                        }
+                    }
+                    Button("Ajouter son dossier à la bibliothèque") {
+                        let c = QbitClient(url: settings.qbitURL, username: settings.qbitUser, password: settings.qbitPassword)
+                        Task {
+                            do { store.addFolder(try await c.defaultSavePath()); test = "✓ Dossier ajouté" } catch { test = error.localizedDescription }
+                        }
+                    }
+                    if let test { Text(test).foregroundStyle(.secondary).lineLimit(2) }
+                }
+            } footer: {
+                Text("Dans qBittorrent : Réglages › Interface Web, coche « Interface utilisateur Web » et choisis un mot de passe.")
+                    .foregroundStyle(.secondary)
+            }
+        }
+        // le client du moteur est gardé en cache : on le recrée avec les nouveaux réglages
+        .onChange(of: "\(settings.qbitEnabled)|\(settings.qbitURL)|\(settings.qbitUser)|\(settings.qbitPassword)") { _, _ in
+            TorrentEngine.shared.reset()
+        }
+    }
+}

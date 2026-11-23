@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key><string>Strapontin</string>
+    <key>CFBundleDisplayName</key><string>Strapontin</string>
+    <key>CFBundleIdentifier</key><string>io.github.kryz3.strapontin</string>
+    <key>CFBundleExecutable</key><string>Strapontin</string>
+    <key>CFBundlePackageType</key><string>APPL</string>
+    <key>CFBundleShortVersionString</key><string>0.1.0</string>
+    <key>CFBundleVersion</key><string>1</string>
+    <key>CFBundleIconFile</key><string>AppIcon</string>
+    <key>CFBundleDevelopmentRegion</key><string>fr</string>
+    <key>LSMinimumSystemVersion</key><string>14.0</string>
+    <key>LSApplicationCategoryType</key><string>public.app-category.entertainment</string>
+    <key>NSHighResolutionCapable</key><true/>
+    <key>NSPrincipalClass</key><string>NSApplication</string>
+    <key>NSDocumentsFolderUsageDescription</key><string>Strapontin lit tes films et séries rangés dans Documents.</string>
+    <key>NSDownloadsFolderUsageDescription</key><string>Strapontin peut ajouter tes téléchargements à la bibliothèque.</string>
+    <key>NSRemovableVolumesUsageDescription</key><string>Strapontin peut lire des vidéos sur un disque externe.</string>
+    <key>NSNetworkVolumesUsageDescription</key><string>Strapontin peut lire des vidéos sur un disque réseau.</string>
+    <!-- Sparkle : clé publique EdDSA des mises à jour. SUFeedURL et la clé TMDb sont ajoutés par scripts/bundle.sh. -->
+    <key>SUPublicEDKey</key><string>RFxx2uLBwpfYVNS/ImeCHxrPVEGwxrZCqafnHZajjvU=</string>
+    <key>SUEnableAutomaticChecks</key><true/>
+    <key>NSAppTransportSecurity</key>
+    <dict><key>NSAllowsLocalNetworking</key><true/></dict>
+</dict>
+</plist>
