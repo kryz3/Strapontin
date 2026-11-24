@@ -3,6 +3,13 @@
 Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), versions [SemVer](https://semver.org/lang/fr/).
 La section d'une version sert de notes à sa release GitHub.
 
+## [Non publié]
+
+- Lecteur : bouton « Épisode précédent » (⇧N), désactivé au premier épisode, qui passe à la saison d'avant si besoin.
+- Lecteur : panneau « Épisodes » (E), façon Netflix : toute la saison par-dessus la vidéo, qui continue derrière,
+  avec image, titre, durée, résumé, progression et disponibilité de chaque épisode ; un clic lit l'épisode ou lance
+  son téléchargement. L'épisode en cours est mis en avant ; Échap ferme le panneau.
+
 ## [0.1.2] - 2026-11-23
 
 - Images de la bibliothèque de retour (Accueil, Films, Séries, fiches) : les affiches et fonds restés dans le cache de

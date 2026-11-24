@@ -52,6 +52,26 @@ public enum NextEpisode: Equatable, Sendable {
     }
 }
 
+/// L'épisode d'avant celui qu'on regarde, dans la bibliothèque (saisons comprises, spéciaux à part).
+public enum PreviousEpisode {
+    public static func before(_ current: MediaFile, files: [MediaFile]) -> MediaFile? {
+        guard let s = current.season, let e = current.episode else { return nil }
+        let start = EpisodeRules.owned([current]).filter { $0.season == s }.map(\.episode).min() ?? e
+        var best: (EpisodeKey, MediaFile)?
+        for f in files where f.path != current.path {
+            for k in EpisodeRules.owned([f]) {
+                // la saison 0 (spéciaux) ne s'enchaîne pas avec les autres
+                guard (k.season == 0) == (s == 0) else { continue }
+                guard k.season < s || (k.season == s && k.episode < start) else { continue }
+                if let b = best, (b.0.season, b.0.episode) > (k.season, k.episode) { continue }
+                if let b = best, b.0 == k, !(f.inProgress && !b.1.inProgress) { continue }
+                best = (k, f)
+            }
+        }
+        return best?.1
+    }
+}
+
 /// Garder la langue choisie d'un épisode à l'autre : mpv ne retient que le numéro de piste, qui change d'un fichier à l'autre.
 public struct TrackTraits: Hashable, Sendable {
     public var id: Int

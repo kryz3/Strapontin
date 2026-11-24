@@ -10,6 +10,10 @@ protocol PlayerActions: AnyObject {
     func toggleMute()
     func toggleFullScreen()
     func playNext()
+    func playPrevious()
+    /// Lire un épisode précis de la série (panneau Épisodes).
+    func playEpisode(_ file: MediaFile)
+    func toggleEpisodes()
     func select(_ track: Track?, type: String)
     func toggleInfo()
     func refreshTracks()
@@ -72,9 +76,19 @@ struct PlayerControlsView: View {
             .padding(.bottom, model.controlsVisible || showTracks ? 178 : 40)
             .animation(.easeInOut(duration: 0.25), value: model.next == nil)
             .animation(.easeInOut(duration: 0.25), value: model.skip)
-            .opacity(model.scrubbing ? 0 : 1)
-            .allowsHitTesting(!model.scrubbing)
+            .opacity(model.scrubbing || model.episodesOpen ? 0 : 1)
+            .allowsHitTesting(!model.scrubbing && !model.episodesOpen)
             .animation(.easeOut(duration: 0.15), value: model.scrubbing)
+
+            // panneau Épisodes : par-dessus la vidéo, qui continue derrière, assombrie
+            if model.episodesOpen, let id = model.seriesId {
+                Color.black.opacity(0.45).contentShape(Rectangle())
+                    .onTapGesture { actions.toggleEpisodes() }
+                    .transition(.opacity)
+                EpisodesPanel(series: SeriesModel.of(id), current: model.currentEpisode, actions: actions)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+            }
 
             if let info = model.info {
                 Text(info)
@@ -89,6 +103,7 @@ struct PlayerControlsView: View {
         }
         .preferredColorScheme(.dark)
         .animation(.easeInOut(duration: 0.25), value: model.controlsVisible)
+        .animation(.spring(response: 0.35, dampingFraction: 0.9), value: model.episodesOpen)
     }
 
     private var topBar: some View {
@@ -138,12 +153,28 @@ struct PlayerControlsView: View {
                 }
 
                 HStack(spacing: 14) {
+                    if model.seriesId != nil {
+                        Button(action: actions.playPrevious) {
+                            Image(systemName: "backward.end.fill").font(.system(size: 14, weight: .bold))
+                        }
+                        .buttonStyle(GlassCircle(size: 38))
+                        .disabled(!model.hasPrevious)
+                        .opacity(model.hasPrevious ? 1 : 0.4)
+                        .help(model.hasPrevious ? "Épisode précédent (⇧N)" : "Premier épisode")
+                        Button(action: actions.toggleEpisodes) {
+                            Label("Épisodes", systemImage: "rectangle.stack.fill").font(.system(size: 12, weight: .semibold))
+                                .padding(.horizontal, 12).padding(.vertical, 8)
+                        }
+                        .buttonStyle(GlassCapsule())
+                        .help("Tous les épisodes de la saison (E)")
+                    }
                     if model.hasNext {
                         Button(action: actions.playNext) {
                             Label("Épisode suivant", systemImage: "forward.end.fill").font(.system(size: 12, weight: .semibold))
                                 .padding(.horizontal, 12).padding(.vertical, 8)
                         }
                         .buttonStyle(GlassCapsule())
+                        .help("Épisode suivant (N)")
                     }
                     Spacer()
                     Button { actions.refreshTracks(); showTracks.toggle() } label: {

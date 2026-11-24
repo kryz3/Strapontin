@@ -29,6 +29,11 @@ final class PlayerModel: ObservableObject {
     @Published var volume: Double = 100
     @Published var controlsVisible = true
     @Published var hasNext = false
+    @Published var hasPrevious = false
+    /// Série en cours (nil pour un film) et épisode affiché : boutons Précédent / Épisodes.
+    @Published var seriesId: Int?
+    @Published var currentEpisode: EpisodeKey?
+    @Published var episodesOpen = false
     @Published var audioTracks: [Track] = []
     @Published var subTracks: [Track] = []
     @Published var info: String?
@@ -288,6 +293,7 @@ final class PlayerController: NSObject, NSWindowDelegate {
         model.info = nil
         model.hasNext = false
         updateTitle()
+        updateSeriesContext()
         startThumbnails(item.path)
         let file = currentFile
         IntroAnalyzer.shared.playbackStarted(file)
@@ -298,6 +304,42 @@ final class PlayerController: NSObject, NSWindowDelegate {
             player.set("sid", "auto")
         }
         player.load(item.path, start: item.start)
+    }
+
+    /// Série, épisode en cours et épisode d'avant, pour les boutons et le panneau Épisodes.
+    private func updateSeriesContext() {
+        let file = currentFile
+        let id = file.flatMap(Self.seriesId)
+        model.seriesId = id
+        model.currentEpisode = file.flatMap { f in f.season.flatMap { s in f.episode.map { EpisodeKey(s, $0) } } }
+        model.hasPrevious = previousFile != nil
+        if let id, let s = file?.season { SeriesModel.of(id).show(season: s) }
+    }
+
+    private var sameSeriesFiles: [MediaFile] {
+        guard let file = currentFile, let key = file.mediaKey else { return [] }
+        return LibraryStore.shared.files.filter { $0.mediaKey == key }
+    }
+
+    private var previousFile: MediaFile? {
+        currentFile.flatMap { PreviousEpisode.before($0, files: sameSeriesFiles) }
+    }
+
+    /// Passe à un autre fichier tout de suite (épisode précédent, choix dans le panneau), pistes gardées.
+    private func jump(to file: MediaFile) {
+        guard !changing, !closing, file.path != currentFile?.path else { return }
+        saveProgress(finished: false)
+        changing = true
+        model.next = nil
+        let item = PlayItem(file: file, title: queue[index].title, resume: true)
+        player.tracks { [weak self] tracks in
+            guard let self, !self.closing else { return }
+            func selected(_ type: String) -> TrackTraits? { tracks.first { $0.type == type && $0.selected }?.traits }
+            if tracks.contains(where: { $0.type == "audio" }) { self.carriedTracks = (selected("audio"), selected("sub")) }
+            self.queue = Array(self.queue.prefix(self.index + 1)) + [item]
+            self.index += 1
+            self.loadCurrent()
+        }
     }
 
     // MARK: - Intro, générique, épisode suivant
@@ -559,7 +601,7 @@ final class PlayerController: NSObject, NSWindowDelegate {
     }
 
     private func checkIdle() {
-        guard model.controlsVisible, !model.paused, hoverTime == nil, model.forcedHover == nil, Date().timeIntervalSince(lastActivity) > 2.5 else { return }
+        guard model.controlsVisible, !model.paused, !model.episodesOpen, hoverTime == nil, model.forcedHover == nil, Date().timeIntervalSince(lastActivity) > 2.5 else { return }
         withAnimation(.easeIn(duration: 0.4)) { model.controlsVisible = false }
         setTitlebar(visible: false)
         NSCursor.setHiddenUntilMouseMoves(true)
@@ -594,6 +636,16 @@ extension PlayerController: PlayerActions {
         if ownsWindow { window?.toggleFullScreen(nil) } else { player.command(["cycle", "fullscreen"]) }
     }
     func playNext() { moveToNext(finished: endCard.visible) }
+    func playPrevious() { if let f = previousFile { jump(to: f) }; activity() }
+    func playEpisode(_ file: MediaFile) {
+        model.episodesOpen = false
+        jump(to: file)
+    }
+    func toggleEpisodes() {
+        guard model.seriesId != nil else { return }
+        model.episodesOpen.toggle()
+        activity()
+    }
     func playNextNow() { moveToNext(finished: true) }
     func dismissNext() {
         if endCard.ended { close(); return }
@@ -671,7 +723,8 @@ final class PlayerContainerView: NSView {
         case 124: c.seek(by: e.modifierFlags.contains(.shift) ? 60 : 5)     // →
         case 125: c.setVolume(max(0, c.model.volume - 5))         // ↓
         case 126: c.setVolume(min(150, c.model.volume + 5))       // ↑
-        case 53: c.closePlayer()                                  // échap
+        case 53:                                                  // échap : le panneau d'abord, puis le lecteur
+            if c.model.episodesOpen { c.toggleEpisodes() } else { c.closePlayer() }
         case 36, 76: return c.primaryOverlayAction()              // entrée : Passer l'intro, Lire maintenant
         default:
             // les raccourcis avec ⌘ (⌘W, ⌘Q…) restent aux menus
@@ -679,7 +732,8 @@ final class PlayerContainerView: NSView {
             switch e.charactersIgnoringModifiers?.lowercased() ?? "" {
             case "f": c.toggleFullScreen()
             case "m": c.toggleMute()
-            case "n": c.playNext()
+            case "n": if e.modifierFlags.contains(.shift) { c.playPrevious() } else { c.playNext() }
+            case "e": c.toggleEpisodes()
             case "a": c.cycle("audio")
             case "s": c.cycle("sub")
             case "i": c.toggleInfo()
@@ -706,6 +760,10 @@ extension PlayerController {
         case "passer": skipMarker()
         case "entree": _ = primaryOverlayAction()
         case "suivant": playNext()
+        case "precedent": playPrevious()
+        case "episodes": toggleEpisodes()
+        case "episode":   // episode=<nom du fichier> : comme un clic dans le panneau
+            if let f = LibraryStore.shared.files.first(where: { $0.fileName == p.last }) { playEpisode(f) }
         case "maintenant": playNextNow()
         case "generique": dismissNext()
         case "aid", "sid": player.set(p[0], value)
@@ -729,7 +787,8 @@ extension PlayerController {
                               "recap=\(span(self.markers.recap)) intro=\(span(self.markers.intro)) generique=\(span(self.markers.credits))",
                               "skip=\(self.model.skip.map { "\($0.kind)" } ?? "-")",
                               "carte=\(self.model.next.map { "\($0.kind) \($0.title) reste=\($0.secondsLeft.map(String.init) ?? "-") fin=\($0.ended)" } ?? "-")",
-                              "pistes=\(chosen.joined(separator: ","))")
+                              "pistes=\(chosen.joined(separator: ","))",
+                              "precedent=\(self.model.hasPrevious) episodes=\(self.model.episodesOpen)")
                         fflush(stdout)
                     }
                 }

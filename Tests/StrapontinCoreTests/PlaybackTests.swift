@@ -231,6 +231,24 @@ final class PlaybackTests: XCTestCase {
         XCTAssertEqual(c.secondsLeft, 10)
     }
 
+    // MARK: épisode précédent
+
+    func testPreviousEpisodeWithinSeasonAndAcrossSeasons() {
+        let s1e9 = file("Show.S01E09"), s1e10 = file("Show.S01E10"), s2e1 = file("Show.S02E01"), s2e3 = file("Show.S02E03")
+        let all = [s1e9, s1e10, s2e1, s2e3]
+        XCTAssertEqual(PreviousEpisode.before(s2e3, files: all)?.path, s2e1.path)    // trou : le plus proche avant
+        XCTAssertEqual(PreviousEpisode.before(s2e1, files: all)?.path, s1e10.path)   // saison d'avant
+        XCTAssertNil(PreviousEpisode.before(s1e9, files: all))                       // premier épisode
+    }
+
+    func testPreviousEpisodeSkipsSpecialsAndDoubleEpisodes() {
+        let special = file("Show.S00E01"), s1e1 = file("Show.S01E01"), double = file("Show.S01E02E03"), s1e4 = file("Show.S01E04")
+        let all = [special, s1e1, double, s1e4]
+        XCTAssertEqual(PreviousEpisode.before(s1e4, files: all)?.path, double.path)
+        XCTAssertEqual(PreviousEpisode.before(double, files: all)?.path, s1e1.path)
+        XCTAssertNil(PreviousEpisode.before(s1e1, files: all))                       // pas les spéciaux
+    }
+
     // MARK: épisode suivant
 
     private func file(_ name: String) -> MediaFile {

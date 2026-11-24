@@ -153,7 +153,7 @@ final class SeriesModel: ObservableObject {
 
     // MARK: saisons et épisodes
 
-    private var files: [MediaFile] { store.files.filter { $0.mediaKey == key } }
+    var files: [MediaFile] { store.files.filter { $0.mediaKey == key } }
 
     var seasons: [Int] {
         let owned = files.compactMap { $0.episode == nil ? nil : $0.season }
