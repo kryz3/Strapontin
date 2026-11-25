@@ -367,11 +367,15 @@ final class PlayerController: NSObject, NSWindowDelegate {
 
     private func fileLoaded() {
         let path = index < queue.count ? queue[index].path : ""
+        let seriesKey = currentFile.flatMap { Self.seriesId($0) != nil ? $0.mediaKey : nil }
         player.tracks { [weak self] tracks in
             guard let self, !self.closing else { return }
             if let wanted = self.carriedTracks {
                 self.carriedTracks = nil
                 self.apply(wanted, to: tracks)
+            } else if let key = seriesKey, let saved = SeriesTracks.get(key), tracks.contains(where: { $0.type == "audio" }) {
+                // pistes retenues pour cette série lors d'une séance précédente
+                self.apply((saved.audio, saved.subtitle), to: tracks)
             }
             self.refreshTracks()
         }
@@ -693,7 +697,17 @@ extension PlayerController: PlayerActions {
     }
     func select(_ track: Track?, type: String) {
         player.select(track, type: type)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { self.refreshTracks() }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { self.refreshTracks(); self.rememberTracks() }
+    }
+
+    /// Le choix de pistes est retenu pour la série : il revient au prochain épisode, même un autre jour.
+    private func rememberTracks() {
+        guard let f = currentFile, Self.seriesId(f) != nil, let key = f.mediaKey else { return }
+        player.tracks { tracks in
+            guard tracks.contains(where: { $0.type == "audio" }) else { return }
+            func selected(_ type: String) -> TrackTraits? { tracks.first { $0.type == type && $0.selected }?.traits }
+            SeriesTracks.set(key, RememberedTracks(audio: selected("audio"), subtitle: selected("sub")))
+        }
     }
     func toggleInfo() {
         if model.info != nil { model.info = nil; return }
@@ -702,7 +716,10 @@ extension PlayerController: PlayerActions {
     func closePlayer() {
         if model.isFullScreen { toggleFullScreen() } else { close() }
     }
-    func cycle(_ what: String) { player.command(["cycle", what]); DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { self.refreshTracks() } }
+    func cycle(_ what: String) {
+        player.command(["cycle", what])
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { self.refreshTracks(); self.rememberTracks() }
+    }
 }
 
 final class PlayerContainerView: NSView {
@@ -766,7 +783,9 @@ extension PlayerController {
             if let f = LibraryStore.shared.files.first(where: { $0.fileName == p.last }) { playEpisode(f) }
         case "maintenant": playNextNow()
         case "generique": dismissNext()
-        case "aid", "sid": player.set(p[0], value)
+        case "aid", "sid":   // comme un choix dans le panneau Audio et sous-titres
+            player.set(p[0], value)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { self.refreshTracks(); self.rememberTracks() }
         case "survol":
             model.forcedHover = Double(value)
             hoverTimeline(Double(value))
@@ -828,5 +847,20 @@ extension PlayerController {
             NSGraphicsContext.restoreGraphicsState()
             try? out.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
         }
+    }
+}
+
+/// Pistes retenues par série (préférences de l'app).
+enum SeriesTracks {
+    private static let key = "seriesTracks"
+    static func get(_ mediaKey: String) -> RememberedTracks? {
+        guard let data = UserDefaults.standard.data(forKey: key),
+              let all = try? JSONDecoder().decode([String: RememberedTracks].self, from: data) else { return nil }
+        return all[mediaKey]
+    }
+    static func set(_ mediaKey: String, _ tracks: RememberedTracks) {
+        var all = (UserDefaults.standard.data(forKey: key)).flatMap { try? JSONDecoder().decode([String: RememberedTracks].self, from: $0) } ?? [:]
+        all[mediaKey] = tracks
+        if let data = try? JSONEncoder().encode(all) { UserDefaults.standard.set(data, forKey: key) }
     }
 }

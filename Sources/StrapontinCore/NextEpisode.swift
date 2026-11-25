@@ -73,7 +73,7 @@ public enum PreviousEpisode {
 }
 
 /// Garder la langue choisie d'un épisode à l'autre : mpv ne retient que le numéro de piste, qui change d'un fichier à l'autre.
-public struct TrackTraits: Hashable, Sendable {
+public struct TrackTraits: Hashable, Sendable, Codable {
     public var id: Int
     public var language: String?
     public var title: String?
@@ -130,4 +130,12 @@ public enum TrackChoice: Equatable, Sendable {
         if let best = pool.max(by: { (score($0), -$0.id) < (score($1), -$1.id) }) { return .track(best.id) }
         return subtitles && forcedOnly(w) ? .off : .automatic
     }
+}
+
+/// Pistes choisies pour une série, retenues d'une séance à l'autre (VO sous-titrée, VF…).
+/// `subtitle` nil : sous-titres désactivés.
+public struct RememberedTracks: Codable, Equatable, Sendable {
+    public var audio: TrackTraits?
+    public var subtitle: TrackTraits?
+    public init(audio: TrackTraits?, subtitle: TrackTraits?) { self.audio = audio; self.subtitle = subtitle }
 }
