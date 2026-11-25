@@ -138,6 +138,9 @@ final class DownloadsModel: ObservableObject {
                 if let prev = lastProgress[t.hash], prev < 1, t.isDone {
                     finishedAt[t.hash] = Date()
                     LibraryStore.shared.rescan()
+                    let link = book[t.hash]
+                    let ep = link.flatMap { l in l.season.map { s in String(format: "S%02d", s) + (l.episode.map { String(format: "E%02d", $0) } ?? "") } }
+                    Notifier.shared.downloadFinished(title: link?.media?.title ?? t.name, detail: ep, mediaKey: link?.mediaKey)
                 }
                 lastProgress[t.hash] = t.isDone ? 1 : t.progress
             }

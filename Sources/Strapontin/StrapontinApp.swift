@@ -53,6 +53,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         Task { @MainActor in
             AppUpdater.shared.start()
+            Notifier.shared.start()
             LibraryStore.shared.start()
             DownloadsModel.shared.start()
             TrackerModel.shared.start()
