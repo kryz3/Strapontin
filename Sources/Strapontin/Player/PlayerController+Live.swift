@@ -210,3 +210,58 @@ extension PlayerController {
         }
     }
 }
+
+// MARK: - Versions d'un film ou d'un épisode en streaming
+
+extension PlayerController {
+    /// Les versions du titre en cours (doublons du fournisseur : VF, VOSTFR, 4K…). Une seule : affichée pour information.
+    func loadVersions() async {
+        guard index < queue.count, let key = queue[index].progressKey, let t = Watch.title(fromStreamKey: key) else { return }
+        let path = queue[index].path
+        var options: [VersionOption] = []
+        var current: String?
+        switch t.kind {
+        case .movie:
+            for r in IPTVVOD.find(.movie, tmdbId: t.tmdbId, titles: [queue[index].title], year: nil) {
+                guard let u = IPTVStore.shared.url(of: r) else { continue }
+                options.append(VersionOption(id: u, label: IPTVVOD.sourceLabel(r.name), detail: r.name))
+                if u == path { current = u }
+            }
+        case .tv:
+            guard let e = t.episode else { return }
+            let streams = SeriesStreams.of(t.tmdbId)
+            await streams.load(tmdbId: t.tmdbId, titles: [queue[index].title], year: nil)
+            for r in streams.refs {
+                guard let ep = await streams.episode(season: e.season, episode: e.episode, in: r) else { continue }
+                options.append(VersionOption(id: ep.url, label: IPTVVOD.sourceLabel(r.name), detail: r.name))
+                if ep.url == path { current = ep.url }
+            }
+        }
+        guard index < queue.count, queue[index].path == path else { return }   // on a changé de titre entre-temps
+        // deux versions au libellé identique : le nom du fournisseur les distingue
+        let counts = Dictionary(grouping: options, by: \.label).mapValues(\.count)
+        model.versions = options.map { o in counts[o.label, default: 0] > 1 ? VersionOption(id: o.id, label: "\(o.label) — \(o.detail)", detail: o.detail) : o }
+        model.currentVersion = current ?? options.first?.id
+    }
+
+    func selectVersion(_ id: String) {
+        guard index < queue.count, id != queue[index].path, model.versions.contains(where: { $0.id == id }) else { return }
+        let position = model.position
+        var item = queue[index]
+        item.path = id
+        item.start = position
+        // même titre, même position : seule la source change
+        queue[index] = item
+        model.currentVersion = id
+        loadCurrent()
+    }
+
+    func addSubtitleFile() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = ["srt", "ass", "ssa", "vtt", "sub"].compactMap { .init(filenameExtension: $0) }
+        panel.allowsMultipleSelection = false
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        player.command(["sub-add", url.path, "select"])
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.refreshTracks() }
+    }
+}

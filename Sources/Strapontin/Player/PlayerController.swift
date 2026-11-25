@@ -83,6 +83,9 @@ final class PlayerModel: ObservableObject {
     @Published var typedNumber: String?
     @Published var audioTracks: [Track] = []
     @Published var subTracks: [Track] = []
+    /// Streaming à la demande : versions du titre en cours, et celle qu'on lit.
+    @Published var versions: [VersionOption] = []
+    @Published var currentVersion: String?
     @Published var info: String?
     @Published var isFullScreen = false
     @Published var chapters: [Chapter] = []
@@ -360,6 +363,9 @@ final class PlayerController: NSObject, NSWindowDelegate {
         model.hasNext = false
         updateTitle()
         updateSeriesContext()
+        model.versions = []
+        model.currentVersion = nil
+        if item.live == nil, item.progressKey != nil { Task { await loadVersions() } }
         startThumbnails(item.path)
         let file = currentFile
         IntroAnalyzer.shared.playbackStarted(file)
@@ -1015,6 +1021,11 @@ extension PlayerController {
             model.controlsVisible = value != "non"
             lastActivity = value != "non" ? Date() : .distantPast
         case "fermer": close()
+        case "versions":   // les versions proposées, et celle qu'on lit
+            let all = model.versions.map { ($0.id == model.currentVersion ? "*" : "") + $0.label }
+            print("ESSAI versions [\(all.joined(separator: " | "))] sous-titres=\(model.subTracks.count)"); fflush(stdout)
+        case "version":   // version=<n> : comme un clic dans la colonne Version
+            if let n = Int(value), n < model.versions.count { selectVersion(model.versions[n].id) }
         case "etat":
             player.tracks { [weak self] tracks in
                 guard let self else { return }

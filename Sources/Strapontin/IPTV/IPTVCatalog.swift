@@ -143,12 +143,23 @@ final class SeriesStreams: ObservableObject {
         let s = SeriesStreams(); cache[tmdbId] = s; return s
     }
     @Published private(set) var ref: VODRef?
+    /// Toutes les versions de la série chez le fournisseur (FR, VOSTFR, 4K…), la meilleure d'abord.
+    @Published private(set) var refs: [VODRef] = []
 
     func load(tmdbId: Int, titles: [String], year: Int?) async {
-        guard ref == nil, let r = IPTVVOD.find(.tv, tmdbId: tmdbId, titles: titles, year: year).first else { return }
+        guard ref == nil else { return }
+        let all = IPTVVOD.find(.tv, tmdbId: tmdbId, titles: titles, year: year)
+        guard let r = all.first else { return }
+        refs = all
         ref = r
         await IPTVStore.shared.loadEpisodes(r)
         objectWillChange.send()
+    }
+
+    /// Un épisode dans une version précise (ses épisodes sont demandés au besoin).
+    func episode(season: Int, episode: Int, in r: VODRef) async -> VODEpisode? {
+        await IPTVStore.shared.loadEpisodes(r)
+        return IPTVStore.shared.episodes[r.id]?.first { $0.season == season && $0.episode == episode }
     }
 
     func episode(season: Int, episode: Int) -> VODEpisode? {

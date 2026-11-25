@@ -23,6 +23,10 @@ protocol PlayerActions: AnyObject {
     func retryLive()
     /// Direct : changer de qualité (variante de la chaîne).
     func selectQuality(_ variantID: String)
+    /// Film ou épisode en streaming : changer de version (VF, VOSTFR, 4K…) à la même position.
+    func selectVersion(_ id: String)
+    /// Ajouter un fichier de sous-titres (.srt, .ass, .vtt) à ce qu'on regarde.
+    func addSubtitleFile()
     func select(_ track: Track?, type: String)
     func toggleInfo()
     func refreshTracks()
@@ -59,6 +63,8 @@ struct PlayerControlsView: View {
                 LinearGradient(stops: [.init(color: .black.opacity(0.55), location: 0), .init(color: .clear, location: 0.22),
                                        .init(color: .clear, location: 0.55), .init(color: .black.opacity(0.8), location: 1)],
                                startPoint: .top, endPoint: .bottom)
+                    // toute la fenêtre, zone de la barre de titre comprise : pas de bande d'une autre couleur en haut
+                    .ignoresSafeArea()
                     .allowsHitTesting(false)
                     .transition(.opacity)
 
@@ -335,7 +341,9 @@ struct PlayerControlsView: View {
                     .buttonStyle(GlassCircle(size: 38))
                     .help("Audio et sous-titres")
                     .popover(isPresented: $showTracks, arrowEdge: .top) {
-                        TracksPanel(audio: model.audioTracks, subs: model.subTracks) { t, type in actions.select(t, type: type) }
+                        TracksPanel(audio: model.audioTracks, subs: model.subTracks, versions: model.versions,
+                                    currentVersion: model.currentVersion, selectVersion: actions.selectVersion,
+                                    addSubtitles: actions.addSubtitleFile) { t, type in actions.select(t, type: type) }
                     }
                     VolumeControl(volume: model.volume, set: actions.setVolume, mute: actions.toggleMute)
                     Button(action: actions.toggleMini) {
@@ -370,12 +378,20 @@ struct TracksPanel: View {
     var qualities: [ChannelVariant] = []
     var currentQuality: String?
     var selectQuality: (String) -> Void = { _ in }
+    /// Streaming à la demande : les versions du titre (une seule : affichée pour information).
+    var versions: [VersionOption] = []
+    var currentVersion: String?
+    var selectVersion: (String) -> Void = { _ in }
+    var addSubtitles: (() -> Void)?
     let select: (Track?, String) -> Void
 
     init(audio: [Track], subs: [Track], qualities: [ChannelVariant] = [], currentQuality: String? = nil,
-         selectQuality: @escaping (String) -> Void = { _ in }, select: @escaping (Track?, String) -> Void) {
+         selectQuality: @escaping (String) -> Void = { _ in }, versions: [VersionOption] = [], currentVersion: String? = nil,
+         selectVersion: @escaping (String) -> Void = { _ in }, addSubtitles: (() -> Void)? = nil,
+         select: @escaping (Track?, String) -> Void) {
         self.audio = audio; self.subs = subs; self.qualities = qualities; self.currentQuality = currentQuality
-        self.selectQuality = selectQuality; self.select = select
+        self.selectQuality = selectQuality; self.versions = versions; self.currentVersion = currentVersion
+        self.selectVersion = selectVersion; self.addSubtitles = addSubtitles; self.select = select
     }
 
     var body: some View {
@@ -393,11 +409,29 @@ struct TracksPanel: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 Divider()
             }
+            if !versions.isEmpty {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(versions.count > 1 ? "VERSION" : "QUALITÉ").font(.system(size: 11, weight: .heavy)).foregroundStyle(.secondary)
+                        .padding(.horizontal, 10).padding(.bottom, 6)
+                    if versions.count == 1 {
+                        Text(versions[0].label).font(.system(size: 13)).padding(.horizontal, 10).padding(.vertical, 7)
+                        Text("Une seule version de ce titre chez ton fournisseur.").font(.system(size: 11)).foregroundStyle(.secondary)
+                            .padding(.horizontal, 10).fixedSize(horizontal: false, vertical: true)
+                    } else {
+                        ForEach(versions) { v in
+                            row(v.label, selected: v.id == currentVersion) { selectVersion(v.id) }.help(v.detail)
+                        }
+                    }
+                }
+                .padding(14)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                Divider()
+            }
             column("Audio", audio, type: "audio", allowNone: false)
             Divider()
             column("Sous-titres", subs, type: "sub", allowNone: true)
         }
-        .frame(width: qualities.isEmpty ? 520 : 720)
+        .frame(width: qualities.isEmpty && versions.isEmpty ? 520 : 720)
         .frame(minHeight: 160)
     }
 
@@ -410,6 +444,12 @@ struct TracksPanel: View {
                     if allowNone { row("Désactivés", selected: !tracks.contains(where: \.selected)) { select(nil, type) } }
                     ForEach(tracks) { t in row(t.label, selected: t.selected) { select(t, type) } }
                     if tracks.isEmpty && !allowNone { Text("Aucune piste").foregroundStyle(.secondary).padding(10) }
+                    if type == "sub", let add = addSubtitles {
+                        if tracks.isEmpty {
+                            Text("Ce flux n'a pas de sous-titres.").font(.system(size: 11)).foregroundStyle(.secondary).padding(.horizontal, 10)
+                        }
+                        Button("Ajouter un fichier…", action: add).buttonStyle(.link).font(.system(size: 12)).padding(.horizontal, 10).padding(.top, 6)
+                    }
                 }
             }
         }
@@ -436,22 +476,36 @@ struct VolumeControl: View {
     let volume: Double
     let set: (Double) -> Void
     let mute: () -> Void
-    @State private var hover = false
+    @State private var open = false
+    @State private var closeTask: Task<Void, Never>?
 
     var body: some View {
+        // zone de survol de taille fixe : le curseur qui apparaît ne déplace rien, donc pas de va-et-vient
         HStack(spacing: 8) {
             Button(action: mute) {
                 Image(systemName: volume == 0 ? "speaker.slash.fill" : volume < 50 ? "speaker.wave.1.fill" : "speaker.wave.2.fill")
                     .font(.system(size: 13, weight: .semibold))
             }
             .buttonStyle(GlassCircle(size: 38))
-            if hover {
-                Slider(value: Binding(get: { volume }, set: set), in: 0...150)
-                    .frame(width: 100).controlSize(.small).tint(.white)
-                    .transition(.move(edge: .leading).combined(with: .opacity))
+            Slider(value: Binding(get: { volume }, set: set), in: 0...150)
+                .frame(width: 100).controlSize(.small).tint(.white)
+                .opacity(open ? 1 : 0)
+                .allowsHitTesting(open)
+        }
+        .frame(width: 146, alignment: .leading)
+        .contentShape(Rectangle())
+        .onHover { h in
+            closeTask?.cancel()
+            if h {
+                withAnimation(.easeOut(duration: 0.15)) { open = true }
+            } else {
+                // un léger délai avant de replier : un passage du pointeur en bord de zone ne fait pas clignoter
+                closeTask = Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(450))
+                    if !Task.isCancelled { withAnimation(.easeOut(duration: 0.2)) { open = false } }
+                }
             }
         }
-        .onHover { h in withAnimation(.easeOut(duration: 0.2)) { hover = h } }
     }
 }
 
@@ -538,4 +592,11 @@ struct Scrubber: View {
               title.range(of: #"^[\d:.,]+$"#, options: .regularExpression) == nil else { return nil }
         return title
     }
+}
+
+/// Une version d'un titre en streaming (« Full HD · VF »), avec le nom du fournisseur en détail.
+struct VersionOption: Identifiable, Hashable {
+    var id: String
+    var label: String
+    var detail: String
 }
