@@ -81,6 +81,8 @@ public struct Media: Codable, Identifiable, Hashable, Sendable {
     public var genres: [String]
     public var runtime: Int?
     public var tagline: String?
+    /// Séries : nombre de saisons (TMDb).
+    public var seasonCount: Int?
     public var logoPath: String?
     public var cast: [CastMember]?
     public var certification: String?

@@ -5,6 +5,11 @@ La section d'une version sert de notes à sa release GitHub.
 
 ## [Non publié]
 
+- « Pour toi » (⌘4) : un fil de programmes choisis d'après tes goûts, à faire défiler (molette, trackpad, ↑ ↓) :
+  grand visuel, affiche, infos, résumé, distribution cliquable, « Parce que tu as aimé … ». Actions : Télécharger,
+  Ma liste, J'aime, Déjà vu, Pas pour moi, Voir la fiche. Calculé sur le Mac, à partir de la bibliothèque, de ce qui
+  est regardé, de Ma liste et des réactions ; recommandations et découverte TMDb ; de la variété et un peu de découverte.
+
 - Lecteur : bouton « Épisode précédent » (⇧N), désactivé au premier épisode, qui passe à la saison d'avant si besoin.
 - Lecteur : panneau « Épisodes » (E), façon Netflix : toute la saison par-dessus la vidéo, qui continue derrière,
   avec image, titre, durée, résumé, progression et disponibilité de chaque épisode ; un clic lit l'épisode ou lance

@@ -132,6 +132,7 @@ public final class TMDbClient: @unchecked Sendable {
         m.genres = (d["genres"] as? [[String: Any]] ?? []).compactMap { $0["name"] as? String }
         m.runtime = (d["runtime"] as? Int) ?? (d["episode_run_time"] as? [Int])?.first
         m.tagline = (d["tagline"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        m.seasonCount = d["number_of_seasons"] as? Int
         // logo du titre (comme sur Apple TV), dans la langue choisie de préférence
         // pas les .svg : l'app ne sait pas les afficher (le titre disparaissait de la fiche)
         let logos = ((d["images"] as? [String: Any])?["logos"] as? [[String: Any]] ?? [])

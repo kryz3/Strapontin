@@ -60,7 +60,7 @@ final class EssaiHarness: ObservableObject {
         switch verb {
         case "tab":
             let map: [String: TopTab] = ["home": .home, "movies": .movies, "shows": .shows, "discover": .discover,
-                                         "downloads": .downloads, "search": .search]
+                                         "downloads": .downloads, "search": .search, "foryou": .forYou]
             if let t = map[arg] { send(.tab(t)) }
         case "open": send(.open(arg))
         case "back": send(.back)
@@ -112,6 +112,11 @@ final class EssaiHarness: ObservableObject {
                 TrackerModel.shared.follow(m, backfill: false)
                 Task { await TrackerModel.shared.checkNew() }
             }
+        case "pourtoi":   // pourtoi:like|dislike|seen sur la première carte, ou pourtoi:etat
+            let m = ForYouModel.shared
+            if let r = FeedReaction(rawValue: arg), let first = m.cards.first { m.react(first, r) }
+            print("ESSAI pourtoi", m.cards.prefix(8).map { "\($0.title) [\($0.genreIds.first ?? 0)] ← \($0.because ?? "découverte")" }.joined(separator: " | "))
+            fflush(stdout)
         case "qualite":   // qualite:<clé de fiche>|<choix> : comme le menu de la cloche
             let p = arg.split(separator: "|").map(String.init)
             if p.count == 2 { TrackerModel.shared.setQuality(QualityChoice(rawValue: p[1]), for: p[0]) }

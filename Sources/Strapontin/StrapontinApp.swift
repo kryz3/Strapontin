@@ -107,7 +107,8 @@ struct StrapontinApp: App {
                 Button("Accueil") { GoTo.open(TopTab.home.rawValue) }.keyboardShortcut("1", modifiers: .command)
                 Button("Films") { GoTo.open(TopTab.movies.rawValue) }.keyboardShortcut("2", modifiers: .command)
                 Button("Séries") { GoTo.open(TopTab.shows.rawValue) }.keyboardShortcut("3", modifiers: .command)
-                Button("Découvrir") { GoTo.open(TopTab.discover.rawValue) }.keyboardShortcut("4", modifiers: .command)
+                Button("Pour toi") { GoTo.open(TopTab.forYou.rawValue) }.keyboardShortcut("4", modifiers: .command)
+                Button("Découvrir") { GoTo.open(TopTab.discover.rawValue) }.keyboardShortcut("5", modifiers: .command)
                 Button("Recherche") { GoTo.open(TopTab.search.rawValue) }
                 Divider()
                 Button("Historique") { GoTo.open("history") }.keyboardShortcut("y", modifiers: .command)
