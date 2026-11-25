@@ -34,6 +34,8 @@ final class PlayerModel: ObservableObject {
     @Published var seriesId: Int?
     @Published var currentEpisode: EpisodeKey?
     @Published var episodesOpen = false
+    /// Mini-lecteur (petite fenêtre flottante) : contrôles réduits.
+    @Published var mini = false
     @Published var audioTracks: [Track] = []
     @Published var subTracks: [Track] = []
     @Published var info: String?
@@ -95,6 +97,8 @@ final class PlayerController: NSObject, NSWindowDelegate {
     private var hoverTime: Double?
     private var hoverPending = false
     private var decoded: (slot: Int, image: NSImage)?
+    /// Cadre d'avant le mini-lecteur.
+    private var miniRestore: NSRect?
 
     static func play(_ items: [PlayItem]) {
         current?.close()
@@ -159,10 +163,11 @@ final class PlayerController: NSObject, NSWindowDelegate {
 
     private func bindPlayer() {
         player.onTime = { [weak self] t in self?.timeChanged(t) }
-        player.onDuration = { [weak self] d in self?.model.duration = d }
+        player.onDuration = { [weak self] d in self?.model.duration = d; self?.publishNowPlaying() }
         player.onPause = { [weak self] p in
             self?.model.paused = p
             self?.activity()
+            self?.publishNowPlaying()
         }
         player.onEndOfFile = { [weak self] in self?.endOfFile() }
         player.onLeftEndOfFile = { [weak self] in
@@ -304,6 +309,14 @@ final class PlayerController: NSObject, NSWindowDelegate {
             player.set("sid", "auto")
         }
         player.load(item.path, start: item.start)
+        NowPlaying.shared.attach(self)
+        publishNowPlaying()
+    }
+
+    /// Centre de contrôle et touches multimédia : ce qui joue en ce moment.
+    private func publishNowPlaying() {
+        NowPlaying.shared.update(title: model.title, subtitle: model.subtitle, duration: model.duration,
+                                 position: model.position, paused: model.paused)
     }
 
     /// Série, épisode en cours et épisode d'avant, pour les boutons et le panneau Épisodes.
@@ -576,6 +589,7 @@ final class PlayerController: NSObject, NSWindowDelegate {
         saveTimer?.invalidate()
         thumbnails?.stop()
         IntroAnalyzer.shared.playbackEnded()
+        NowPlaying.shared.detach(self)
         if let mouseMonitor { NSEvent.removeMonitor(mouseMonitor) }
         if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
         NSCursor.setHiddenUntilMouseMoves(false)
@@ -628,8 +642,37 @@ final class PlayerController: NSObject, NSWindowDelegate {
 
 extension PlayerController: PlayerActions {
     func togglePause() { player.togglePause(); activity() }
-    func seek(by s: Double) { player.seek(relative: s); activity() }
+    func seek(by s: Double) {
+        player.seek(relative: s); activity()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { self.publishNowPlaying() }
+    }
+
+    /// Mini-lecteur : petite fenêtre toujours au premier plan dans un coin de l'écran, sur tous les bureaux ;
+    /// la même touche la remet comme avant. (mpv dessine avec Metal/Vulkan : pas d'« image dans l'image » du système.)
+    func toggleMini() {
+        guard let w = window else { return }
+        if model.isFullScreen { w.toggleFullScreen(nil) }
+        if let frame = miniRestore {
+            miniRestore = nil
+            model.mini = false
+            w.level = .normal
+            w.collectionBehavior.remove(.canJoinAllSpaces)
+            w.setFrame(frame, display: true, animate: true)
+        } else {
+            miniRestore = w.frame
+            model.mini = true
+            model.episodesOpen = false
+            let screen = (w.screen ?? NSScreen.main)?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+            let size = NSSize(width: 480, height: 270)
+            w.level = .floating
+            w.collectionBehavior.insert(.canJoinAllSpaces)
+            w.setFrame(NSRect(x: screen.maxX - size.width - 20, y: screen.minY + 20, width: size.width, height: size.height),
+                       display: true, animate: true)
+        }
+        activity()
+    }
     func seek(to s: Double) {
+        defer { DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { self.publishNowPlaying() } }
         player.seek(absolute: s)
         model.position = s
         advance()
@@ -751,6 +794,7 @@ final class PlayerContainerView: NSView {
             case "m": c.toggleMute()
             case "n": if e.modifierFlags.contains(.shift) { c.playPrevious() } else { c.playNext() }
             case "e": c.toggleEpisodes()
+            case "p" where e.modifierFlags.contains(.shift): c.toggleMini()
             case "a": c.cycle("audio")
             case "s": c.cycle("sub")
             case "i": c.toggleInfo()
@@ -779,6 +823,7 @@ extension PlayerController {
         case "suivant": playNext()
         case "precedent": playPrevious()
         case "episodes": toggleEpisodes()
+        case "mini": toggleMini()
         case "episode":   // episode=<nom du fichier> : comme un clic dans le panneau
             if let f = LibraryStore.shared.files.first(where: { $0.fileName == p.last }) { playEpisode(f) }
         case "maintenant": playNextNow()
@@ -807,7 +852,8 @@ extension PlayerController {
                               "skip=\(self.model.skip.map { "\($0.kind)" } ?? "-")",
                               "carte=\(self.model.next.map { "\($0.kind) \($0.title) reste=\($0.secondsLeft.map(String.init) ?? "-") fin=\($0.ended)" } ?? "-")",
                               "pistes=\(chosen.joined(separator: ","))",
-                              "precedent=\(self.model.hasPrevious) episodes=\(self.model.episodesOpen)")
+                              "precedent=\(self.model.hasPrevious) episodes=\(self.model.episodesOpen)",
+                              "mini=\(self.model.mini) fenetre=\(self.window.map { "\(Int($0.frame.width))x\(Int($0.frame.height)) niveau=\($0.level.rawValue)" } ?? "-")")
                         fflush(stdout)
                     }
                 }

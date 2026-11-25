@@ -9,6 +9,16 @@ La section d'une version sert de notes à sa release GitHub.
 - Lecteur : panneau « Épisodes » (E), façon Netflix : toute la saison par-dessus la vidéo, qui continue derrière,
   avec image, titre, durée, résumé, progression et disponibilité de chaque épisode ; un clic lit l'épisode ou lance
   son téléchargement. L'épisode en cours est mis en avant ; Échap ferme le panneau.
+- Barre du haut toujours visible, sur toutes les pages, fiches comprises.
+- Recherche par acteur : acteurs et équipe dans la recherche, page de chaque personne (photo, biographie,
+  filmographie), distribution cliquable sur les fiches.
+- Langues audio et sous-titres retenues par série, d'une séance à l'autre.
+- Qualité des téléchargements (Réglages › Téléchargements) : 720p, 1080p, 4K si disponible ou la meilleure, taille
+  maximale par épisode ; une série commencée garde la qualité de ses épisodes ; qualité propre à chaque série suivie.
+- Notification quand un téléchargement est terminé (un clic ouvre la fiche).
+- Mini-lecteur (⇧P) : petite fenêtre toujours devant, dans un coin de l'écran.
+- Touches multimédia, Centre de contrôle et écran verrouillé : lecture/pause, ±10 s, épisode suivant/précédent.
+- Historique (⌘Y) : ce qui a été regardé, par jour, avec reprise et « marquer comme non vu ».
 
 ## [0.1.2] - 2026-11-23
 

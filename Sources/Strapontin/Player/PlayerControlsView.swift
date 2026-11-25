@@ -14,6 +14,7 @@ protocol PlayerActions: AnyObject {
     /// Lire un épisode précis de la série (panneau Épisodes).
     func playEpisode(_ file: MediaFile)
     func toggleEpisodes()
+    func toggleMini()
     func select(_ track: Track?, type: String)
     func toggleInfo()
     func refreshTracks()
@@ -119,6 +120,7 @@ struct PlayerControlsView: View {
 
     private var bottom: some View {
         VStack(alignment: .leading, spacing: 14) {
+            if !model.mini {
             VStack(alignment: .leading, spacing: 3) {
                 if let s = model.subtitle {
                     Text(s.uppercased()).font(.system(size: 11, weight: .heavy)).kerning(0.8).foregroundStyle(.white.opacity(0.7))
@@ -127,6 +129,7 @@ struct PlayerControlsView: View {
             }
             .opacity(model.scrubbing ? 0 : 1)
             .animation(.easeOut(duration: 0.15), value: model.scrubbing)
+            }
 
             Scrubber(position: model.position, duration: model.duration, chapters: model.chapters,
                      forcedHover: model.forcedHover, thumbnail: actions.thumbnail(at:), onHoverTime: actions.hoverTimeline,
@@ -142,6 +145,20 @@ struct PlayerControlsView: View {
             .foregroundStyle(.white.opacity(0.75))
             .padding(.top, -6)
 
+            if model.mini {
+                // mini-lecteur : l'essentiel seulement
+                HStack(spacing: 16) {
+                    transport("gobackward.10", size: 16) { actions.seek(by: -10) }
+                    Button(action: actions.togglePause) {
+                        Image(systemName: model.paused ? "play.fill" : "pause.fill").font(.system(size: 18, weight: .bold))
+                    }
+                    .buttonStyle(GlassCircle(size: 42))
+                    transport("goforward.10", size: 16) { actions.seek(by: 10) }
+                    Spacer()
+                    Button(action: actions.toggleMini) { Image(systemName: "pip.exit").font(.system(size: 13, weight: .bold)) }
+                        .buttonStyle(GlassCircle(size: 34)).help("Agrandir (⇧P)")
+                }
+            } else {
             ZStack {
                 HStack(spacing: 30) {
                     transport("gobackward.10", size: 22) { actions.seek(by: -10) }
@@ -186,6 +203,11 @@ struct PlayerControlsView: View {
                         TracksPanel(audio: model.audioTracks, subs: model.subTracks) { t, type in actions.select(t, type: type) }
                     }
                     VolumeControl(volume: model.volume, set: actions.setVolume, mute: actions.toggleMute)
+                    Button(action: actions.toggleMini) {
+                        Image(systemName: model.mini ? "pip.exit" : "pip.enter").font(.system(size: 14, weight: .bold))
+                    }
+                    .buttonStyle(GlassCircle(size: 38))
+                    .help(model.mini ? "Agrandir (⇧P)" : "Mini-lecteur, toujours devant (⇧P)")
                     Button(action: actions.toggleFullScreen) {
                         Image(systemName: model.isFullScreen ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
                             .font(.system(size: 14, weight: .bold))
@@ -193,9 +215,10 @@ struct PlayerControlsView: View {
                     .buttonStyle(GlassCircle(size: 38))
                 }
             }
+            }
         }
-        .padding(.horizontal, 44)
-        .padding(.bottom, 30)
+        .padding(.horizontal, model.mini ? 16 : 44)
+        .padding(.bottom, model.mini ? 12 : 30)
     }
 
     private func transport(_ name: String, size: CGFloat, action: @escaping () -> Void) -> some View {

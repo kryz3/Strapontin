@@ -46,6 +46,7 @@ final class MPVPlayer {
         opt("keep-open", "yes")
         opt("idle", "yes")
         opt("input-default-bindings", "no")
+        opt("input-media-keys", "no")   // touches multimédia et Centre de contrôle : gérés par NowPlaying
         opt("osc", "no")
         opt("sub-auto", "fuzzy")
         opt("audio-file-auto", "fuzzy")

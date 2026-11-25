@@ -110,6 +110,7 @@ struct StrapontinApp: App {
                 Button("Découvrir") { GoTo.open(TopTab.discover.rawValue) }.keyboardShortcut("4", modifiers: .command)
                 Button("Recherche") { GoTo.open(TopTab.search.rawValue) }
                 Divider()
+                Button("Historique") { GoTo.open("history") }.keyboardShortcut("y", modifiers: .command)
                 Button("Stockage") { GoTo.open("storage") }.keyboardShortcut("s", modifiers: [.command, .shift])
                 Button("Indexeur") { GoTo.open("tracker") }.keyboardShortcut("i", modifiers: [.command, .shift])
             }

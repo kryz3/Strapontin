@@ -16,7 +16,7 @@ let package = Package(
             name: "Strapontin",
             dependencies: ["Cmpv", "StrapontinCore", .product(name: "Sparkle", package: "Sparkle")],
             path: "Sources/Strapontin",
-            linkerSettings: [.linkedFramework("OpenGL"), .linkedFramework("QuartzCore"), .linkedFramework("AppKit")]
+            linkerSettings: [.linkedFramework("OpenGL"), .linkedFramework("QuartzCore"), .linkedFramework("AppKit"), .linkedFramework("MediaPlayer")]
         ),
         .testTarget(name: "StrapontinCoreTests", dependencies: ["StrapontinCore"], path: "Tests/StrapontinCoreTests"),
     ]

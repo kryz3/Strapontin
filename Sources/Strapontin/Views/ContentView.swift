@@ -139,6 +139,8 @@ struct ContentView: View {
             DownloadDetailView(entryId: id)
         } else if id == "tracker" {
             TrackerView()
+        } else if id == "history" {
+            HistoryView()
         } else if id == "storage" {
             StorageView()
         } else {
@@ -169,6 +171,7 @@ private struct TopBar: View {
             .buttonStyle(.plain)
             .help("Réglages (⌘,)")
             .contextMenu {
+                Button("Historique") { open("history") }
                 Button("Stockage") { open("storage") }
                 if showIndexer { Button("Indexeur") { open("tracker") } }
             }
