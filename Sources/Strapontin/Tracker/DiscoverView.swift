@@ -138,7 +138,7 @@ struct SearchPage: View {
                     TMDbSearchSections(query: query)
                 }
             }
-            .padding(.top, 150)
+            .padding(.top, 172)   // sous le champ fixe (barre d'outils + champ + fondu)
             .padding(.bottom, 40)
         }
         .ignoresSafeArea(edges: .top)
@@ -162,8 +162,6 @@ struct SearchPage: View {
                 ForEach(dls) { DownloadPosterCard(entry: $0) }
                 ForEach(mine) { PosterCard(item: $0) }
             }
-        } else {
-            SectionMessage(title: "Dans ta bibliothèque", message: "Aucun résultat dans ta bibliothèque.")
         }
     }
 
