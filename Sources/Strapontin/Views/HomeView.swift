@@ -5,13 +5,6 @@ import SwiftUI
 struct HomeView: View {
     @EnvironmentObject var store: LibraryStore
 
-    private var upNext: [LibraryItem] {
-        // en cours, puis séries dont on a commencé à regarder des épisodes
-        let started = store.items.filter { i in i.kind == .tv && !i.allWatched && i.files.contains(where: \.watched) }
-        let list = store.items.filter(\.inProgress) + started.filter { !$0.inProgress }
-        return list.sorted { $0.lastPlayed > $1.lastPlayed }
-    }
-
     private var featured: [LibraryItem] {
         let withArt = store.items.filter { $0.media?.backdropPath != nil }
         let fresh = withArt.sorted { $0.added > $1.added }.prefix(4)
@@ -25,13 +18,12 @@ struct HomeView: View {
             VStack(alignment: .leading, spacing: 42) {
                 if store.items.isEmpty {
                     DownloadingShelf().padding(.top, 90)
+                    ContinueShelf()
                     EmptyLibrary(compact: !DownloadsModel.shared.visibleEntries(store: store).isEmpty)
                 } else {
                     HeroCarousel(items: featured)
                     DownloadingShelf()
-                    if !upNext.isEmpty {
-                        Shelf(title: "À suivre") { ForEach(upNext) { LandscapeCard(item: $0) } }
-                    }
+                    ContinueShelf()
                     Shelf(title: "Ajoutés récemment") {
                         ForEach(SortOrder.added.sort(store.items).prefix(20)) { PosterCard(item: $0) }
                     }

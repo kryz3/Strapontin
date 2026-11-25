@@ -328,7 +328,9 @@ struct EpisodeRow: View {
     @ObservedObject private var store = IPTVStore.shared
     private var status: EpisodeStatus { snap.statuses[episode] ?? .unknown }
 
-    private func streamKey(_ v: VODEpisode) -> String { "stream:\(series.key):\(v.season):\(v.episode)" }
+    private func streamKey(_ v: VODEpisode) -> String { Watch.streamKey(titleKey) }
+    private var titleKey: TitleKey { TitleKey(.tv, series.tmdbId, EpisodeKey(snap.season, episode)) }
+    private var watchPoint: WatchPoint? { Watch.point(titleKey) }
 
     private func streamTitle(_ v: VODEpisode) -> String {
         let p = IPTVStore.shared.progress[streamKey(v)]
@@ -365,6 +367,10 @@ struct EpisodeRow: View {
         .padding(12)
         .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(.white.opacity(hover ? 0.07 : 0)))
         .onHover { h in withAnimation(.easeOut(duration: 0.15)) { hover = h } }
+        .contextMenu {
+            let seen = watchPoint?.watched == true
+            Button(seen ? "Marquer comme non vu" : "Marquer comme vu") { Watch.setWatched(titleKey, !seen) }
+        }
     }
 
     private var thumbnail: some View {
@@ -382,12 +388,13 @@ struct EpisodeRow: View {
         .overlay {
             if case let .downloading(_, p, phase, _) = status {
                 DownloadStrip(progress: p, phase: phase)
-            } else if let f = file, f.inProgress, f.duration > 0 {
-                DownloadStrip(progress: f.position / f.duration, phase: .downloading)
+            } else if let w = watchPoint, w.inProgress {
+                // la progression du titre, en fichier ou en streaming
+                DownloadStrip(progress: w.fraction, phase: .downloading)
             }
         }
         .overlay(alignment: .topTrailing) {
-            if file?.watched == true {
+            if watchPoint?.watched == true {
                 Image(systemName: "checkmark.circle.fill").font(.system(size: 17))
                     .foregroundStyle(.white, Color.black.opacity(0.55)).padding(7)
             }

@@ -339,13 +339,13 @@ struct CategoryPage: View {
                 if items.isEmpty {
                     // bibliothèque vide mais quelque chose arrive : on le montre quand même
                     DownloadingShelf(kind: kind).padding(.top, 90)
+                    ContinueShelf(kind: kind)
                     EmptyLibrary(kind: kind, compact: !DownloadsModel.shared.visibleEntries(kind: kind, store: store).isEmpty)
                 } else {
                     HeroCarousel(items: Array(items.filter { $0.media?.backdropPath != nil }
                         .sorted { ($0.media?.rating ?? 0) > ($1.media?.rating ?? 0) }.prefix(6)))
                     DownloadingShelf(kind: kind)
-                    let upNext = items.filter(\.inProgress).sorted { $0.lastPlayed > $1.lastPlayed }
-                    if !upNext.isEmpty { Shelf(title: "À suivre") { ForEach(upNext) { LandscapeCard(item: $0) } } }
+                    ContinueShelf(kind: kind)
                     Shelf(title: "Ajoutés récemment") {
                         ForEach(SortOrder.added.sort(items).prefix(20)) { PosterCard(item: $0) }
                     }

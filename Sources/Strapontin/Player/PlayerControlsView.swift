@@ -13,6 +13,8 @@ protocol PlayerActions: AnyObject {
     func playPrevious()
     /// Lire un épisode précis de la série (panneau Épisodes).
     func playEpisode(_ file: MediaFile)
+    /// Un épisode en streaming (panneau Épisodes), quand on ne l'a pas en fichier.
+    func playStreamEpisode(_ key: EpisodeKey)
     func toggleEpisodes()
     func toggleMini()
     func zap(_ delta: Int)

@@ -24,7 +24,12 @@ struct HistoryView: View {
             return Entry(file: f, item: item, date: Date(timeIntervalSince1970: t))
         }
         let streams = iptv.streams.map { Entry(stream: $0, date: $0.date) }
-        return (files + streams).sorted { $0.date > $1.date }
+        // un titre n'apparaît qu'une fois, quelle que soit la source (la lecture la plus récente)
+        var seen = Set<String>()
+        return (files + streams).sorted { $0.date > $1.date }.filter { e in
+            let title = e.file.flatMap(Watch.key(of:))?.id ?? e.stream.flatMap { Watch.title(fromStreamKey: $0.key)?.id }
+            return title.map { seen.insert($0).inserted } ?? true
+        }
     }
 
     private var groups: [(String, [Entry])] {
@@ -100,7 +105,13 @@ struct HistoryView: View {
             }
             Spacer()
             if let k = r.mediaKey {
-                NavigationLink(value: k) {
+                // reprendre avec la meilleure source (fichier s'il est arrivé depuis, sinon streaming), sinon la fiche
+                Button {
+                    Task {
+                        let ok = await Watch.title(fromStreamKey: r.key).asyncMap { await Watch.playBest($0, title: r.title, year: nil) } ?? false
+                        if !ok { GoTo.open(k) }
+                    }
+                } label: {
                     SmallPill(title: done ? "Revoir" : "Reprendre", icon: done ? "arrow.counterclockwise" : "play.fill", filled: !done)
                 }
                 .buttonStyle(.plain)
@@ -150,5 +161,12 @@ struct HistoryView: View {
             Button(f.watched ? "Marquer comme non vu" : "Marquer comme vu") { store.setWatched([f.path], !f.watched) }
             NavigationLink(value: e.item.media.map { Media.key($0.kind, $0.tmdbId) } ?? e.item.id) { Text("Voir la fiche") }
         }
+    }
+}
+
+extension Optional {
+    func asyncMap<T>(_ f: (Wrapped) async -> T) async -> T? {
+        guard let v = self else { return nil }
+        return await f(v)
     }
 }

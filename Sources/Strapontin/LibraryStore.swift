@@ -443,13 +443,17 @@ final class LibraryStore: ObservableObject {
         save()
     }
 
-    func setWatched(_ paths: [String], _ watched: Bool) {
+    func setWatched(_ paths: [String], _ watched: Bool, mirror: Bool = true) {
+        var titles: [TitleKey] = []
         for i in files.indices where paths.contains(files[i].path) {
             files[i].watched = watched
             files[i].position = 0
+            if mirror, let k = Watch.key(of: files[i]) { titles.append(k) }
         }
         rebuild()
         save()
+        // « vu » vaut pour le titre, donc aussi pour le streaming
+        for k in titles { Watch.setWatched(k, watched) }
     }
 
     func item(id: String) -> LibraryItem? { items.first { $0.id == id } }

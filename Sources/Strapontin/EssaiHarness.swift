@@ -117,6 +117,33 @@ final class EssaiHarness: ObservableObject {
             if let r = FeedReaction(rawValue: arg), let first = m.cards.first { m.react(first, r) }
             print("ESSAI pourtoi", m.cards.prefix(8).map { "\($0.title) [\($0.genreIds.first ?? 0)] ← \($0.because ?? "découverte")" }.joined(separator: " | "))
             fflush(stdout)
+        case "titre":   // titre:tv:33050:1:4 → état du titre, toutes sources
+            if let k = TitleKey(id: arg) {
+                let p = Watch.point(k)
+                print("ESSAI titre \(k.id) pos=\(Int(p?.position ?? -1)) vu=\(p?.watched ?? false) fichiers=\(Watch.files(k).count)"); fflush(stdout)
+            }
+        case "suivre":   // la rangée « À suivre »
+            print("ESSAI suivre", ContinueWatching.entries(kind: nil).map { "\($0.key.id)@\(Int($0.fraction * 100))%" }.joined(separator: " ")); fflush(stdout)
+        case "meilleure":   // meilleure:<titre>|<nom> : comme un clic sur une carte « À suivre »
+            let p = arg.split(separator: "|").map(String.init)
+            if p.count == 2, let k = TitleKey(id: p[0]) { Task { _ = await Watch.playBest(k, title: p[1], year: nil) } }
+        case "streaming":   // streaming:<titre>|<nom> : comme « Regarder en streaming » (film) ou le bouton d'un épisode
+            let p = arg.split(separator: "|").map(String.init)
+            if p.count == 2, let k = TitleKey(id: p[0]) {
+                Task {
+                    if k.kind == .movie, let r = IPTVVOD.find(.movie, tmdbId: k.tmdbId, titles: [p[1]], year: nil).first, let u = IPTVStore.shared.url(of: r) {
+                        IPTVVOD.play(url: u, mediaKey: k.mediaKey, title: p[1], progressKey: Watch.streamKey(k))
+                    } else if let e = k.episode {
+                        await SeriesStreams.of(k.tmdbId).load(tmdbId: k.tmdbId, titles: [p[1]], year: nil)
+                        if let v = SeriesStreams.of(k.tmdbId).episode(season: e.season, episode: e.episode) {
+                            IPTVVOD.play(url: v.url, mediaKey: k.mediaKey, title: p[1], subtitle: "S\(e.season)E\(e.episode)", progressKey: Watch.streamKey(k))
+                        }
+                    }
+                }
+            }
+        case "vu":   // vu:<titre>|oui|non
+            let p = arg.split(separator: "|").map(String.init)
+            if p.count == 2, let k = TitleKey(id: p[0]) { Watch.setWatched(k, p[1] == "oui") }
         case "chercher-chaine", "pays":   // comme la frappe dans la recherche d'« En direct » / un clic dans la barre des pays
             if verb == "pays" { IPTVStore.shared.country = arg.isEmpty ? nil : arg }
             else { NotificationCenter.default.post(name: .essaiLiveQuery, object: arg) }

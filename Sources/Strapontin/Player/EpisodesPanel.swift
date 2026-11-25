@@ -86,9 +86,13 @@ struct EpisodesPanel: View {
         let file = snap.files[n]
         let status = snap.statuses[n] ?? .unknown
         let isCurrent = current == EpisodeKey(shown, n)
+        let stream = SeriesStreams.of(series.tmdbId).episode(season: shown, episode: n)
+        let point = Watch.point(TitleKey(.tv, series.tmdbId, EpisodeKey(shown, n)))
         return Button {
             if let file {
                 if !isCurrent { actions.playEpisode(file) } else { actions.toggleEpisodes() }
+            } else if stream != nil {
+                if !isCurrent { actions.playStreamEpisode(EpisodeKey(shown, n)) } else { actions.toggleEpisodes() }
             } else if case .available = status {
                 series.downloadEpisode(season: shown, episode: n)
             }
@@ -99,11 +103,11 @@ struct EpisodesPanel: View {
                     if let still = info?.stillPath ?? file?.stillPath {
                         RemoteImage(url: TMDbClient.imageURL(still, size: "w300"))
                     }
-                    if let file, file.duration > 0, file.position > 0, !file.watched {
+                    if let point, point.inProgress {
                         Capsule().fill(.white.opacity(0.25)).frame(height: 3)
                             .overlay(alignment: .leading) {
                                 GeometryReader { g in
-                                    Capsule().fill(Theme.accent).frame(width: g.size.width * min(1, file.position / file.duration))
+                                    Capsule().fill(Theme.accent).frame(width: g.size.width * point.fraction)
                                 }
                             }
                             .padding(6)
@@ -131,7 +135,13 @@ struct EpisodesPanel: View {
                         Text(o).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(3)
                             .fixedSize(horizontal: false, vertical: true)
                     }
-                    stateLine(status, file: file)
+                    if file == nil, stream != nil {
+                        Label(point?.watched == true ? "Vu · streaming" : point?.inProgress == true ? "Reprendre en streaming" : "En streaming",
+                              systemImage: point?.watched == true ? "checkmark.circle.fill" : "play.tv")
+                            .font(.system(size: 11, weight: .semibold)).foregroundStyle(point?.watched == true ? Color.secondary : Color.white)
+                    } else {
+                        stateLine(status, file: file)
+                    }
                 }
             }
             .padding(10)
@@ -142,7 +152,7 @@ struct EpisodesPanel: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .disabled(file == nil && !isActionable(status))
+        .disabled(file == nil && stream == nil && !isActionable(status))
     }
 
     private func isActionable(_ s: EpisodeStatus) -> Bool {

@@ -541,6 +541,11 @@ final class IPTVStore: ObservableObject {
 
     func playlist(of e: IPTVEntry) -> IPTVPlaylist? { playlists.first { $0.id == e.playlist } ?? playlists.first }
 
+    func clearProgress(_ key: String) {
+        progress[key] = nil
+        saveState()
+    }
+
     func saveProgress(_ key: String, position: Double, duration: Double) {
         progress[key] = [position, duration, Date().timeIntervalSince1970]
         if let i = streams.firstIndex(where: { $0.key == key }) { streams[i].date = Date() }

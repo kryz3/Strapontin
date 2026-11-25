@@ -435,6 +435,22 @@ struct TMDbPosterCard: View {
                 }
                 .overlay { DownloadOverlay(mediaKey: Media.key(result.kind, result.id)) }
                 .overlay(alignment: .bottomTrailing) { StreamBadge(kind: result.kind, tmdbId: result.id, title: result.title, year: result.year) }
+                .overlay(alignment: .bottom) {
+                    // un film commencé (en streaming ou en fichier) : sa progression, comme sur les affiches de la bibliothèque
+                    if result.kind == .movie, let w = Watch.point(TitleKey(.movie, result.id)), w.inProgress {
+                        GeometryReader { g in
+                            VStack {
+                                Spacer()
+                                ZStack(alignment: .leading) {
+                                    Capsule().fill(.black.opacity(0.5))
+                                    Capsule().fill(.white).frame(width: g.size.width * w.fraction)
+                                }
+                                .frame(height: 4)
+                            }
+                        }
+                        .padding(.horizontal, 10).padding(.bottom, 10)
+                    }
+                }
                 .overlay(alignment: .bottomLeading) {
                     if !owned, let n = versions {
                         Badge(text: n > 0 ? "\(n) VERSION\(n > 1 ? "S" : "")" : "INDISPONIBLE",

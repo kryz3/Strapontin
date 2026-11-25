@@ -41,12 +41,22 @@ struct LiveDisplay: Equatable {
 }
 
 extension PlayItem {
+    /// Reprise : la position la plus récente du titre, qu'elle vienne de ce fichier ou du streaming.
+    @MainActor
     init(file f: MediaFile, title: String, resume: Bool) {
         var subtitle: String?
         if let s = f.season, let e = f.episode {
             subtitle = "Saison \(s), épisode \(e)" + (f.episodeTitle.map { " · \($0)" } ?? "")
         }
-        self.init(path: f.path, title: title, subtitle: subtitle, start: resume && !f.watched ? f.position : 0)
+        let start = resume ? (Watch.key(of: f).map(Watch.resume) ?? (f.watched ? 0 : f.position)) : 0
+        self.init(path: f.path, title: title, subtitle: subtitle, start: start)
+    }
+
+    /// Un épisode en streaming, rattaché à son titre.
+    @MainActor
+    init(stream url: String, title: String, key: TitleKey) {
+        let sub = key.episode.map { "Saison \($0.season), épisode \($0.episode)" }
+        self.init(path: url, title: title, subtitle: sub, start: Watch.resume(key), progressKey: Watch.streamKey(key))
     }
 }
 
@@ -373,12 +383,67 @@ final class PlayerController: NSObject, NSWindowDelegate {
 
     /// Série, épisode en cours et épisode d'avant, pour les boutons et le panneau Épisodes.
     private func updateSeriesContext() {
-        let file = currentFile
-        let id = file.flatMap(Self.seriesId)
+        let t = currentTitle
+        let id = t?.kind == .tv ? t?.tmdbId : nil
         model.seriesId = id
-        model.currentEpisode = file.flatMap { f in f.season.flatMap { s in f.episode.map { EpisodeKey(s, $0) } } }
-        model.hasPrevious = previousFile != nil
-        if let id, let s = file?.season { SeriesModel.of(id).show(season: s) }
+        model.currentEpisode = t?.episode
+        model.hasPrevious = previousTarget != nil || previousFile != nil
+        if let id, let s = t?.episode?.season {
+            SeriesModel.of(id).show(season: s)
+            // les épisodes en streaming de la série, pour enchaîner d'une source à l'autre
+            let series = SeriesModel.of(id)
+            let title = series.media?.title ?? queue[index].title, year = series.media?.year
+            Task { await SeriesStreams.of(id).load(tmdbId: id, titles: [title, series.media?.originalTitle ?? ""], year: year) }
+        }
+    }
+
+    // MARK: - D'une source à l'autre
+
+    /// Le titre en cours (film ou épisode), qu'on lise un fichier ou du streaming.
+    var currentTitle: TitleKey? {
+        if let f = currentFile, let k = Watch.key(of: f) { return k }
+        guard index < queue.count else { return nil }
+        return queue[index].progressKey.flatMap(Watch.title(fromStreamKey:))
+    }
+
+    /// Sources de chaque épisode de la série : fichiers de la bibliothèque, épisodes en streaming.
+    private func crossSources(_ id: Int) -> [EpisodeKey: CrossSource.Source] {
+        let mk = Media.key(.tv, id)
+        var files: [EpisodeKey: String] = [:]
+        for f in LibraryStore.shared.files where f.mediaKey == mk {
+            if let s = f.season, let e = f.episode, files[EpisodeKey(s, e)] == nil { files[EpisodeKey(s, e)] = f.path }
+        }
+        var streams: [EpisodeKey: String] = [:]
+        if let r = SeriesStreams.of(id).ref {
+            for e in IPTVStore.shared.episodes[r.id] ?? [] { streams[EpisodeKey(e.season, e.episode)] = e.url }
+        }
+        return CrossSource.sources(files: files, streams: streams)
+    }
+
+    /// Épisodes déjà diffusés que TMDb connaît (pour proposer de télécharger celui qui manque).
+    private func knownEpisodes(_ id: Int) -> [EpisodeKey] {
+        let series = SeriesModel.of(id), today = SeriesModel.today()
+        return series.episodes.flatMap { s, eps in
+            eps.compactMap { e, info in (info.airDate ?? "") <= today && info.airDate != nil ? EpisodeKey(s, e) : nil }
+        }
+    }
+
+    private func crossItem(_ id: Int, _ key: EpisodeKey, _ source: CrossSource.Source) -> (PlayItem, MediaFile?) {
+        let title = SeriesModel.of(id).media?.title ?? queue[index].title
+        switch source {
+        case .file(let path):
+            let f = LibraryStore.shared.files.first { $0.path == path }!
+            return (PlayItem(file: f, title: title, resume: true), f)
+        case .stream(let url):
+            return (PlayItem(stream: url, title: title, key: TitleKey(.tv, id, key)), nil)
+        }
+    }
+
+    /// L'épisode d'avant, quelle que soit sa source.
+    private var previousTarget: (PlayItem, MediaFile?)? {
+        guard let t = currentTitle, t.kind == .tv, let cur = t.episode,
+              let (k, src) = CrossSource.previous(before: cur, sources: crossSources(t.tmdbId)) else { return nil }
+        return crossItem(t.tmdbId, k, src)
     }
 
     private var sameSeriesFiles: [MediaFile] {
@@ -392,11 +457,14 @@ final class PlayerController: NSObject, NSWindowDelegate {
 
     /// Passe à un autre fichier tout de suite (épisode précédent, choix dans le panneau), pistes gardées.
     private func jump(to file: MediaFile) {
-        guard !changing, !closing, file.path != currentFile?.path else { return }
+        jump(to: PlayItem(file: file, title: queue[index].title, resume: true))
+    }
+
+    private func jump(to item: PlayItem) {
+        guard !changing, !closing, item.path != queue[index].path else { return }
         saveProgress(finished: false)
         changing = true
         model.next = nil
-        let item = PlayItem(file: file, title: queue[index].title, resume: true)
         player.tracks { [weak self] tracks in
             guard let self, !self.closing else { return }
             func selected(_ type: String) -> TrackTraits? { tracks.first { $0.type == type && $0.selected }?.traits }
@@ -494,6 +562,24 @@ final class PlayerController: NSObject, NSWindowDelegate {
     }
 
     private func findUpcoming(after file: MediaFile?) -> Upcoming {
+        let base = findUpcomingInLibrary(after: file)
+        // d'une source à l'autre : l'épisode suivant peut être en streaming (ou en fichier après un épisode en streaming)
+        guard let t = currentTitle, t.kind == .tv, let cur = t.episode,
+              let (k, src) = CrossSource.next(after: cur, known: knownEpisodes(t.tmdbId), sources: crossSources(t.tmdbId))
+        else { return base }
+        let cross: Upcoming = src.map { s in let (i, f) = crossItem(t.tmdbId, k, s); return .item(i, f) } ?? .missing(tmdbId: t.tmdbId, k)
+        if file == nil { return cross }   // on lit du streaming
+        switch base {
+        case .missing(_, let mk) where src != nil && k <= mk: return cross
+        case let .item(_, f?) where src != nil:
+            if let s = f.season, let e = f.episode, k < EpisodeKey(s, e) { return cross }
+            return base
+        case .none where src != nil: return cross
+        default: return base
+        }
+    }
+
+    private func findUpcomingInLibrary(after file: MediaFile?) -> Upcoming {
         guard let file, let season = file.season, file.episode != nil else {
             // fichiers sans numéro, ou ouverts directement : la file telle quelle
             guard index + 1 < queue.count else { return .none }
@@ -546,11 +632,13 @@ final class PlayerController: NSObject, NSWindowDelegate {
         case .none:
             return nil
         case let .item(item, file):
+            let streamTitle = item.progressKey.flatMap(Watch.title(fromStreamKey:))
             let key = file.flatMap { f -> EpisodeKey? in
                 guard let s = f.season, let e = f.episode else { return nil }
                 return EpisodeKey(s, e)
-            }
-            let info = file.flatMap(Self.seriesId).flatMap { id in key.flatMap { SeriesModel.of(id).info($0.season, $0.episode) } }
+            } ?? streamTitle?.episode
+            let sid = file.flatMap(Self.seriesId) ?? (streamTitle?.kind == .tv ? streamTitle?.tmdbId : nil)
+            let info = sid.flatMap { id in key.flatMap { SeriesModel.of(id).info($0.season, $0.episode) } }
             let name = [file?.episodeTitle, info?.name].compactMap { $0 }.first { !$0.isEmpty }
             card = NextCard(kind: .ready, label: key.map(label) ?? "", title: name ?? key.map { "Épisode \($0.episode)" } ?? item.title,
                             still: file?.stillPath ?? info?.stillPath, backdrop: backdrop, ended: endCard.ended)
@@ -612,13 +700,23 @@ final class PlayerController: NSObject, NSWindowDelegate {
 
     private func saveProgress(finished: Bool = false) {
         guard !finishedCurrent, index < queue.count, model.position > 0 || finished else { return }
-        if queue[index].live != nil { return }
+        if queue[index].live != nil { return }   // le direct n'a pas de progression
         if let key = queue[index].progressKey {
-            IPTVStore.shared.saveProgress(key, position: finished ? model.duration : model.position, duration: model.duration)
+            if let t = Watch.title(fromStreamKey: key) {
+                // un titre TMDb : streaming et fichiers de la bibliothèque à jour ensemble
+                Watch.save(t, position: model.position, duration: model.duration, finished: finished || endCard.ended)
+            } else {
+                IPTVStore.shared.saveProgress(key, position: finished ? model.duration : model.position, duration: model.duration)
+            }
             return
         }
-        LibraryStore.shared.saveProgress(path: queue[index].path, position: model.position, duration: model.duration,
+        let path = queue[index].path
+        LibraryStore.shared.saveProgress(path: path, position: model.position, duration: model.duration,
                                          finished: finished || endCard.ended, creditsStart: creditsSpan?.start)
+        if let f = LibraryStore.shared.files.first(where: { $0.path == path }), let t = Watch.key(of: f) {
+            Watch.save(t, position: f.watched ? model.duration : model.position, duration: model.duration, finished: f.watched,
+                       playedPath: path)
+        }
     }
 
     private func endOfFile() {
@@ -742,10 +840,20 @@ extension PlayerController: PlayerActions {
         if ownsWindow { window?.toggleFullScreen(nil) } else { player.command(["cycle", "fullscreen"]) }
     }
     func playNext() { moveToNext(finished: endCard.visible) }
-    func playPrevious() { if let f = previousFile { jump(to: f) }; activity() }
+    func playPrevious() {
+        if let (item, _) = previousTarget { jump(to: item) } else if let f = previousFile { jump(to: f) }
+        activity()
+    }
     func playEpisode(_ file: MediaFile) {
         model.episodesOpen = false
         jump(to: file)
+    }
+
+    /// Panneau Épisodes : un épisode qu'on n'a pas en fichier, en streaming.
+    func playStreamEpisode(_ key: EpisodeKey) {
+        guard let id = model.seriesId, case let .stream(url)? = crossSources(id)[key] else { return }
+        model.episodesOpen = false
+        jump(to: crossItem(id, key, .stream(url)).0)
     }
     func toggleEpisodes() {
         guard model.seriesId != nil else { return }
