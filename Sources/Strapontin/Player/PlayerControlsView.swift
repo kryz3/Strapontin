@@ -109,6 +109,10 @@ struct PlayerControlsView: View {
 
     private var topBar: some View {
         HStack(spacing: 12) {
+            // fermer le lecteur, toujours visible avec les contrôles (plein écran compris)
+            Button(action: actions.closePlayer) { Image(systemName: "xmark").font(.system(size: 14, weight: .bold)) }
+                .buttonStyle(GlassCircle(size: 36))
+                .help("Fermer (Échap)")
             Spacer()
             Button(action: actions.toggleInfo) { Image(systemName: "info").font(.system(size: 14, weight: .bold)) }
                 .buttonStyle(GlassCircle(size: 36))

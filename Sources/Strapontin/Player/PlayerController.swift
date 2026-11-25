@@ -784,7 +784,8 @@ final class PlayerContainerView: NSView {
         case 125: c.setVolume(max(0, c.model.volume - 5))         // ↓
         case 126: c.setVolume(min(150, c.model.volume + 5))       // ↑
         case 53:                                                  // échap : le panneau d'abord, puis le lecteur
-            if c.model.episodesOpen { c.toggleEpisodes() } else { c.closePlayer() }
+            // d'abord ce qui est ouvert par-dessus : panneau Épisodes, carte « Épisode suivant »
+            if c.model.episodesOpen { c.toggleEpisodes() } else if c.model.next != nil { c.dismissNext() } else { c.closePlayer() }
         case 36, 76: return c.primaryOverlayAction()              // entrée : Passer l'intro, Lire maintenant
         default:
             // les raccourcis avec ⌘ (⌘W, ⌘Q…) restent aux menus

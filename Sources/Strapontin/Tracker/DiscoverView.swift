@@ -76,9 +76,12 @@ struct DiscoverView: View {
             VStack(alignment: .leading, spacing: 36) {
                 Text("Découvrir").font(.system(size: 30, weight: .bold))
                     .padding(.horizontal, Theme.margin)
+                if tmdbClient() == nil {
+                    MissingTMDbKey().padding(.top, 60)
+                }
                 if let error { Text(error).foregroundStyle(.orange).padding(.horizontal, Theme.margin) }
                 TMDbShelf(title: "Suivis", results: followed)
-                if rows.isEmpty && error == nil {
+                if rows.isEmpty && error == nil && tmdbClient() != nil {
                     ForEach(["Films tendance", "Séries tendance", "Films populaires"], id: \.self) { SkeletonShelf(title: $0) }
                 }
                 ForEach(rows, id: \.0) { title, items in
@@ -267,6 +270,8 @@ struct TMDbSearchSections: View {
         switch phases[kind] ?? .loading {
         case .loading:
             SkeletonShelf(title: title)
+        case .failed(let message) where message == MissingTMDbKey.message:
+            if kind == .movie { MissingTMDbKey(compact: true).padding(.horizontal, Theme.margin) }
         case .failed(let message):
             SectionMessage(title: title, message: message, icon: "exclamationmark.triangle")
         case .done(let results) where results.isEmpty:
@@ -293,7 +298,11 @@ struct TMDbSearchSections: View {
             return list
         } catch {
             guard !Task.isCancelled, query == self.query else { return [] }
-            phases[kind] = .failed("TMDb ne répond pas (\(error.localizedDescription)).")
+            if case TMDbError.badKey = error {
+                phases[kind] = .failed("Clé TMDb refusée : vérifie-la dans Réglages › Fiches.")
+            } else {
+                phases[kind] = .failed("TMDb ne répond pas. Vérifie ta connexion, puis réessaie.")
+            }
             return []
         }
     }
@@ -338,7 +347,8 @@ struct TMDbSearchSections: View {
         guard !Task.isCancelled else { return }
         guard query.count >= 2 else { phases = [.movie: .done([]), .tv: .done([])]; return }
         guard let c = tmdbClient() else {
-            phases = [.movie: .failed("Ajoute une clé TMDb dans les réglages."), .tv: .failed("Ajoute une clé TMDb dans les réglages.")]
+            phases = [.movie: .failed(MissingTMDbKey.message), .tv: .failed(MissingTMDbKey.message)]
+            people = []
             return
         }
         let t0 = ContinuousClock.now
@@ -488,6 +498,8 @@ struct PreviewDetailView: View {
                 } else if let error {
                     ContentUnavailableView("Fiche indisponible", systemImage: "exclamationmark.triangle", description: Text(error))
                         .padding(.top, 120)
+                } else if tmdbClient() == nil {
+                    MissingTMDbKey().padding(.top, 160)
                 } else {
                     FicheSkeleton()
                 }
@@ -518,9 +530,9 @@ struct PreviewDetailView: View {
                 } else {
                     LinearGradient(colors: [Color(white: 0.2), Theme.background], startPoint: .top, endPoint: .bottom)
                 }
+                LinearGradient(colors: [.black.opacity(0.65), .clear], startPoint: .leading, endPoint: .init(x: 0.65, y: 0.5))
                 LinearGradient(stops: [.init(color: .clear, location: 0.3), .init(color: Theme.background.opacity(0.9), location: 0.88),
                                        .init(color: Theme.background, location: 1)], startPoint: .top, endPoint: .bottom)
-                LinearGradient(colors: [.black.opacity(0.65), .clear], startPoint: .leading, endPoint: .init(x: 0.65, y: 0.5))
 
                 VStack(alignment: .leading, spacing: 14) {
                     LogoOrTitle(logoPath: m.logoPath, title: m.title, maxWidth: 480, maxHeight: 160, fontSize: 52)
@@ -575,7 +587,7 @@ struct PreviewDetailView: View {
             } else if tracker.pending.contains(key) {
                 DownloadPill(progress: nil, label: "Envoi au téléchargement…")
             } else if !tracker.configured {
-                SettingsLink {
+                SettingsButton(tab: .indexer) {
                     Label("Brancher un indexeur pour télécharger", systemImage: "gearshape").font(.system(size: 15, weight: .semibold))
                         .padding(.horizontal, 22).padding(.vertical, 11)
                         .background(.ultraThinMaterial, in: Capsule()).overlay(Capsule().stroke(.white.opacity(0.15)))
@@ -942,5 +954,31 @@ struct PersonView: View {
         guard let date, !date.isEmpty else { return place }
         let y = date.prefix(4)
         return place.map { "Né(e) en \(y) · \($0)" } ?? "Né(e) en \(y)"
+    }
+}
+
+/// Pas de clé TMDb : ce qui manque, et où l'ajouter (au lieu d'un chargement sans fin).
+struct MissingTMDbKey: View {
+    static let message = "Les fiches, Découvrir et la recherche du catalogue demandent une clé TMDb."
+    var compact = false
+
+    var body: some View {
+        VStack(alignment: compact ? .leading : .center, spacing: 12) {
+            if !compact {
+                Image(systemName: "key.horizontal").font(.system(size: 40, weight: .light)).foregroundStyle(Theme.accentText)
+                Text("Ajoute une clé TMDb").font(.system(size: 22, weight: .bold))
+            }
+            Text(Self.message + " Elle est gratuite et se colle dans Réglages › Fiches.")
+                .foregroundStyle(.secondary).multilineTextAlignment(compact ? .leading : .center).frame(maxWidth: 460)
+            HStack(spacing: 12) {
+                SettingsButton(tab: .metadata) { SmallPill(title: "Ajouter une clé", icon: "key.fill", filled: true) }
+                    .buttonStyle(.plain)
+                Link(destination: URL(string: "https://www.themoviedb.org/settings/api")!) {
+                    SmallPill(title: "Obtenir une clé gratuite", icon: "arrow.up.right", filled: false)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: compact ? .leading : .center)
     }
 }

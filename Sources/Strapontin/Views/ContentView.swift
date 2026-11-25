@@ -284,7 +284,20 @@ struct GenreRow: Identifiable {
 struct StatusPill: View {
     @EnvironmentObject var store: LibraryStore
     var body: some View {
-        Group {
+        VStack(spacing: 8) {
+            if let e = store.lastError {
+                // une erreur : ⚠, fermeture, et un raccourci vers les réglages quand c'est la clé TMDb
+                HStack(spacing: 10) {
+                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                    Text(e).font(.system(size: 12, weight: .medium)).lineLimit(2)
+                    if e.contains("TMDb") { SettingsButton(tab: .metadata) { Text("Réglages").font(.system(size: 12, weight: .semibold)) } }
+                    Button { store.lastError = nil } label: { Image(systemName: "xmark").font(.system(size: 10, weight: .bold)) }
+                        .buttonStyle(.plain).foregroundStyle(.secondary).help("Fermer")
+                }
+                .padding(.horizontal, 16).padding(.vertical, 9)
+                .background(.regularMaterial, in: Capsule())
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
             if !store.status.isEmpty {
                 HStack(spacing: 8) {
                     ProgressView().controlSize(.small)
@@ -292,11 +305,12 @@ struct StatusPill: View {
                 }
                 .padding(.horizontal, 16).padding(.vertical, 9)
                 .background(.regularMaterial, in: Capsule())
-                .padding(.bottom, 18)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
+        .padding(.bottom, 18)
         .animation(.easeInOut, value: store.status.isEmpty)
+        .animation(.easeInOut, value: store.lastError)
     }
 }
 
@@ -433,15 +447,41 @@ struct EmptyLibrary: View {
     /// Sous une rangée « En téléchargement » : moins d'espace au-dessus.
     var compact = false
     @EnvironmentObject var store: LibraryStore
+    @EnvironmentObject var settings: AppSettings
+    @ObservedObject private var tracker = TrackerModel.shared
+
+    private var folderNames: String {
+        let names = settings.folders.map { ($0 as NSString).lastPathComponent }
+        return names.isEmpty ? "un dossier de la bibliothèque" : names.map { "« \($0) »" }.joined(separator: names.count > 2 ? ", " : " et ")
+    }
+
     var body: some View {
         VStack(spacing: 14) {
             Image(systemName: kind == nil ? "chair.fill" : "play.tv").font(.system(size: 60, weight: .thin))
                 .foregroundStyle(kind == nil ? AnyShapeStyle(Theme.accentText) : AnyShapeStyle(.secondary))
-            Text(kind == .tv ? "Aucune série pour l'instant" : kind == .movie ? "Aucun film pour l'instant" : "Installez-vous")
+            Text(kind == .tv ? "Aucune série pour l'instant" : kind == .movie ? "Aucun film pour l'instant" : "Installe-toi")
                 .font(.system(size: 24, weight: .bold))
-            Text("Dépose tes films dans Documents › Films et tes séries dans Documents › Séries :\nils apparaissent ici tout seuls, avec leur fiche.")
+            Text("Dépose tes films et tes séries dans \(folderNames) : ils apparaissent ici tout seuls, avec leur fiche.\nTu peux aussi glisser un .torrent ou un lien magnet sur la fenêtre.")
                 .multilineTextAlignment(.center).foregroundStyle(.secondary)
-            if store.isScanning { ProgressView().padding(.top, 6) }
+            if store.isScanning {
+                ProgressView().padding(.top, 6)
+            } else if kind == nil {
+                HStack(spacing: 12) {
+                    if let first = settings.folders.first {
+                        Button { NSWorkspace.shared.open(URL(fileURLWithPath: first)) } label: {
+                            SmallPill(title: "Ouvrir le dossier « \((first as NSString).lastPathComponent) »", icon: "folder", filled: true)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    SettingsButton(tab: .library) { SmallPill(title: "Choisir d'autres dossiers…", icon: "folder.badge.plus", filled: false) }
+                        .buttonStyle(.plain)
+                    if !tracker.configured {
+                        SettingsButton(tab: .indexer) { SmallPill(title: "Brancher un indexeur…", icon: "antenna.radiowaves.left.and.right", filled: false) }
+                            .buttonStyle(.plain)
+                    }
+                }
+                .padding(.top, 8)
+            }
         }
         .frame(maxWidth: .infinity)
         .padding(.top, compact ? 30 : 180)

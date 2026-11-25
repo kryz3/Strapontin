@@ -1,14 +1,31 @@
 import StrapontinCore
 import SwiftUI
 
-struct SettingsView: View {
+/// Onglets des réglages : un lien « Brancher un indexeur » ouvre directement le bon.
+enum SettingsTab: String {
+    case library, metadata, playback, downloads, indexer
+    static let key = "settingsTab"
+}
+
+/// Ouvre les réglages sur un onglet donné.
+struct SettingsButton<Label: View>: View {
+    let tab: SettingsTab
+    @ViewBuilder var label: () -> Label
     var body: some View {
-        TabView {
-            LibrarySettings().tabItem { Label("Bibliothèque", systemImage: "folder") }
-            MetadataSettings().tabItem { Label("Fiches", systemImage: "info.square") }
-            PlaybackSettings().tabItem { Label("Lecture", systemImage: "play.rectangle") }
-            QbitSettings().tabItem { Label("Téléchargements", systemImage: "arrow.down.circle") }
-            TrackerSettings().tabItem { Label("Indexeur", systemImage: "magnifyingglass") }
+        SettingsLink { label() }
+            .simultaneousGesture(TapGesture().onEnded { UserDefaults.standard.set(tab.rawValue, forKey: SettingsTab.key) })
+    }
+}
+
+struct SettingsView: View {
+    @AppStorage(SettingsTab.key) private var tab = SettingsTab.library.rawValue
+    var body: some View {
+        TabView(selection: $tab) {
+            LibrarySettings().tabItem { Label("Bibliothèque", systemImage: "folder") }.tag(SettingsTab.library.rawValue)
+            MetadataSettings().tabItem { Label("Fiches", systemImage: "info.square") }.tag(SettingsTab.metadata.rawValue)
+            PlaybackSettings().tabItem { Label("Lecture", systemImage: "play.rectangle") }.tag(SettingsTab.playback.rawValue)
+            QbitSettings().tabItem { Label("Téléchargements", systemImage: "arrow.down.circle") }.tag(SettingsTab.downloads.rawValue)
+            TrackerSettings().tabItem { Label("Indexeur", systemImage: "antenna.radiowaves.left.and.right") }.tag(SettingsTab.indexer.rawValue)
         }
         .frame(width: 560, height: 600)
     }

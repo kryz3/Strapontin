@@ -18,7 +18,7 @@ struct TrackerView: View {
                 } description: {
                     Text("Renseigne l'adresse de l'API Torznab de ton indexeur (Jackett, Prowlarr…) et ta clé API dans les réglages.")
                 } actions: {
-                    SettingsLink { Text("Ouvrir les réglages") }
+                    SettingsButton(tab: .indexer) { Text("Ouvrir les réglages") }
                 }
             } else {
                 Picker("", selection: $pane) {

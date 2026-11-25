@@ -139,7 +139,7 @@ struct EpisodeView: View {
                     .buttonStyle(CircleButtonStyle()).help("Lire depuis le début")
                 }
                 Button { store.setWatched([f.path], !f.watched) } label: {
-                    Image(systemName: f.watched ? "checkmark" : "plus").font(.system(size: 15, weight: .bold))
+                    Image(systemName: f.watched ? "checkmark.circle.fill" : "checkmark.circle").font(.system(size: 15, weight: .bold))
                 }
                 .buttonStyle(CircleButtonStyle()).help(f.watched ? "Marquer comme non vu" : "Marquer comme vu")
                 Button { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: f.path)]) } label: {
@@ -180,7 +180,7 @@ struct EpisodeView: View {
             note("Rien sur l'indexeur pour l'instant")
         case .unknown:
             if !tracker.configured {
-                SettingsLink { SmallPill(title: "Brancher un indexeur pour télécharger", icon: "gearshape", filled: false) }.buttonStyle(.plain)
+                SettingsButton(tab: .indexer) { SmallPill(title: "Brancher un indexeur pour télécharger", icon: "gearshape", filled: false) }.buttonStyle(.plain)
             } else if series.releaseErrors[current.season] != nil {
                 note("L'indexeur n'a pas pu être consulté")
             } else {

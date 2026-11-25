@@ -15,6 +15,17 @@ final class LibraryStore: ObservableObject {
     @Published private(set) var media: [String: Media] = [:]
     @Published private(set) var items: [LibraryItem] = []
     @Published var status: String = ""
+    /// Dernière erreur à montrer (clé TMDb refusée, correction impossible…) : à part de l'activité en cours,
+    /// avec son propre bouton de fermeture ; elle s'efface seule après quelques secondes.
+    @Published var lastError: String?
+
+    func report(_ message: String) {
+        lastError = message
+        let shown = message
+        DispatchQueue.main.asyncAfter(deadline: .now() + 9) { [weak self] in
+            if self?.lastError == shown { self?.lastError = nil }
+        }
+    }
     @Published var isScanning = false
 
     let settings = AppSettings.shared
@@ -241,7 +252,7 @@ final class LibraryStore: ObservableObject {
             status = "Identification \(done)/\(all.count)"
             rebuild()
         }
-        if let fatal { status = fatal.localizedDescription }
+        if let fatal { report(fatal.localizedDescription); status = ""; rebuild(); save(); return }
         for (n, f) in pending.enumerated() {
             status = "Identification \(n + 1)/\(pending.count) : \(f.guessTitle)"
             // vient d'un téléchargement rattaché : sa fiche et son épisode, sans passer un instant par une fiche devinée
@@ -267,7 +278,7 @@ final class LibraryStore: ObservableObject {
                     apply(f.episode.flatMap { seasons[sk]?[$0] }, to: idx)
                 }
             } catch let e as TMDbError {
-                status = e.localizedDescription
+                report(e.localizedDescription)
                 break
             } catch {
                 continue   // réseau coupé : on réessaiera au prochain scan
@@ -364,7 +375,8 @@ final class LibraryStore: ObservableObject {
             }
             if !hadMedia { media[key] = nil }
             rebuild()
-            status = "Fiche non modifiée : \(error.localizedDescription)"
+            status = ""
+            report("Fiche non modifiée : \(error.localizedDescription)")
         }
     }
 

@@ -50,9 +50,9 @@ struct DetailView: View {
                 } else {
                     LinearGradient(colors: [Color(white: 0.2), Theme.background], startPoint: .top, endPoint: .bottom)
                 }
+                LinearGradient(colors: [.black.opacity(0.65), .clear], startPoint: .leading, endPoint: .init(x: 0.65, y: 0.5))
                 LinearGradient(stops: [.init(color: .clear, location: 0.3), .init(color: Theme.background.opacity(0.9), location: 0.88),
                                        .init(color: Theme.background, location: 1)], startPoint: .top, endPoint: .bottom)
-                LinearGradient(colors: [.black.opacity(0.65), .clear], startPoint: .leading, endPoint: .init(x: 0.65, y: 0.5))
 
                 VStack(alignment: .leading, spacing: 14) {
                     TitleLogo(item: item, maxWidth: 480, maxHeight: 160, fontSize: 52)
@@ -186,7 +186,7 @@ struct LibraryItemButtons: View {
                 PlayPill(title: item.kind == .tv ? "Lire \(item.nextUp.map(tag) ?? "")" : "Lire") { play(item, resume: false) }
             }
             Button { store.setWatched(item.files.map(\.path), !item.allWatched) } label: {
-                Image(systemName: item.allWatched ? "checkmark" : "plus").font(.system(size: 15, weight: .bold))
+                Image(systemName: item.allWatched ? "checkmark.circle.fill" : "checkmark.circle").font(.system(size: 15, weight: .bold))
             }
             .buttonStyle(CircleButtonStyle())
             .help(item.allWatched ? "Marquer comme non vu" : "Marquer comme vu")

@@ -110,7 +110,7 @@ struct SeriesFicheView: View {
             DownloadPill(progress: nil, label: "Envoi au téléchargement…")
         }
         if !tracker.configured {
-            SettingsLink {
+            SettingsButton(tab: .indexer) {
                 Label("Brancher un indexeur pour télécharger", systemImage: "gearshape").font(.system(size: 15, weight: .semibold))
                     .padding(.horizontal, 22).padding(.vertical, 11)
                     .background(.ultraThinMaterial, in: Capsule()).overlay(Capsule().stroke(.white.opacity(0.15)))
@@ -471,9 +471,9 @@ struct SmallPill: View {
 struct HeroShade: View {
     var body: some View {
         ZStack {
+            LinearGradient(colors: [.black.opacity(0.65), .clear], startPoint: .leading, endPoint: .init(x: 0.65, y: 0.5))
             LinearGradient(stops: [.init(color: .clear, location: 0.3), .init(color: Theme.background.opacity(0.9), location: 0.88),
                                    .init(color: Theme.background, location: 1)], startPoint: .top, endPoint: .bottom)
-            LinearGradient(colors: [.black.opacity(0.65), .clear], startPoint: .leading, endPoint: .init(x: 0.65, y: 0.5))
         }
         .allowsHitTesting(false)
     }

@@ -79,9 +79,9 @@ struct HeroCarousel: View {
                                 .scaleEffect(i == index ? 1.0 : 1.04)
                         }
                     }
+                    LinearGradient(colors: [.black.opacity(0.6), .clear], startPoint: .leading, endPoint: .init(x: 0.6, y: 0.5))
                     LinearGradient(stops: [.init(color: .clear, location: 0.35), .init(color: Theme.background.opacity(0.85), location: 0.85),
                                            .init(color: Theme.background, location: 1)], startPoint: .top, endPoint: .bottom)
-                    LinearGradient(colors: [.black.opacity(0.6), .clear], startPoint: .leading, endPoint: .init(x: 0.6, y: 0.5))
 
                     VStack(alignment: .leading, spacing: 14) {
                         TitleLogo(item: item, maxWidth: 460, maxHeight: 150, fontSize: 50)
