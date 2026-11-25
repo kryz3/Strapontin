@@ -35,7 +35,7 @@ extension PlayerController {
             updateLiveDisplay()
         } else {
             for (k, v) in [("stream-lavf-o", ""), ("cache", "auto"), ("demuxer-readahead-secs", "1"), ("hls-bitrate", "max"),
-                           ("referrer", ""), ("user-agent", "Strapontin")] { player.set(k, v) }
+                           ("referrer", ""), ("user-agent", LiveOptions.defaultUserAgent)] { player.set(k, v) }
             model.live = nil
         }
     }

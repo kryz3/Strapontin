@@ -119,6 +119,10 @@ public struct LiveWatchdog: Equatable, Sendable {
 
 /// Options mpv / ffmpeg adaptées au direct : reconnexion automatique, cache court, démarrage rapide.
 public enum LiveOptions {
+    /// User-Agent par défaut vers les serveurs IPTV : beaucoup coupent la connexion aux clients inconnus
+    /// (CFNetwork, curl) et n'acceptent que les lecteurs courants.
+    public static let defaultUserAgent = "VLC/3.0.20 LibVLC/3.0.20"
+
     public static func mpv(userAgent: String?, referer: String?) -> [(String, String)] {
         var lavf = ["reconnect=1", "reconnect_streamed=1", "reconnect_on_network_error=1",
                     "reconnect_on_http_error=4xx,5xx", "reconnect_delay_max=4", "rw_timeout=10000000"]
@@ -133,7 +137,7 @@ public enum LiveOptions {
             ("hls-bitrate", "max"),
             ("network-timeout", "10"),
         ]
-        if let userAgent, !userAgent.isEmpty { out.append(("user-agent", userAgent)) }
+        out.append(("user-agent", (userAgent?.isEmpty ?? true) ? defaultUserAgent : userAgent!))
         if let referer, !referer.isEmpty { out.append(("referrer", referer)) }
         return out
     }

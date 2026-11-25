@@ -530,6 +530,8 @@ struct VODDetailView: View {
 struct IPTVSettings: View {
     @ObservedObject private var store = IPTVStore.shared
     @State private var editing: IPTVPlaylist?
+    @State private var testing: String?
+    @State private var diagnostics: [String: String] = [:]
 
     var body: some View {
         Form {
@@ -542,9 +544,17 @@ struct IPTVSettings: View {
                                 .font(.system(size: 11)).foregroundStyle(.secondary)
                         }
                         Spacer()
+                        Button(testing == p.id ? "Test…" : "Tester la connexion") {
+                            testing = p.id
+                            Task { diagnostics[p.id] = await IPTVStore.testConnection(p); testing = nil }
+                        }
+                        .disabled(testing != nil)
                         Button("Modifier") { editing = p }
                         Button(role: .destructive) { store.save(store.playlists.filter { $0.id != p.id }) } label: { Image(systemName: "trash") }
                             .buttonStyle(.borderless)
+                    }
+                    if let d = diagnostics[p.id] {
+                        Text(d).font(.system(size: 11).monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
                     }
                 }
                 HStack {
@@ -645,7 +655,7 @@ private struct PlaylistEditor: View {
             }
             }
             TextField("Guide XMLTV (facultatif)", text: $playlist.guide, prompt: Text("Sinon celui annoncé par la playlist"))
-            TextField("User-Agent (facultatif)", text: $playlist.userAgent)
+            TextField("User-Agent (facultatif)", text: $playlist.userAgent, prompt: Text("Par défaut : \(LiveOptions.defaultUserAgent)"))
             TextField("Referer (facultatif)", text: $playlist.referer)
             Stepper("Rafraîchir toutes les \(playlist.refreshHours) h", value: $playlist.refreshHours, in: 1...72)
             HStack {

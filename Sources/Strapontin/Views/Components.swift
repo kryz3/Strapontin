@@ -83,7 +83,10 @@ final class RemoteImageLoader {
         if let img = cached(url) { return img }
         if let t = inflight[url] { return await t.value }
         let t = Task.detached(priority: .userInitiated) { () -> NSImage? in
-            guard let (data, resp) = try? await URLSession.shared.data(from: url),
+            // logos IPTV : même User-Agent que pour la playlist (certains serveurs refusent les clients inconnus)
+            var req = URLRequest(url: url)
+            if url.host?.contains("tmdb.org") != true { req.setValue(LiveOptions.defaultUserAgent, forHTTPHeaderField: "User-Agent") }
+            guard let (data, resp) = try? await URLSession.shared.data(for: req),
                   (resp as? HTTPURLResponse)?.statusCode == 200 else { return nil }
             return NSImage(data: data)
         }

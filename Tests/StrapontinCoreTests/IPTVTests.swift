@@ -148,6 +148,9 @@ final class IPTVTests: XCTestCase {
         XCTAssertTrue(o["stream-lavf-o"]!.contains("reconnect_streamed=1"))
         XCTAssertEqual(o["user-agent"], "UA")
         XCTAssertEqual(o["referrer"], "https://r.exemple/")
+        // sans User-Agent saisi : celui d'un lecteur courant (les serveurs coupent les clients inconnus)
+        let d = Dictionary(LiveOptions.mpv(userAgent: nil, referer: nil).map { ($0.0, $0.1) }, uniquingKeysWith: { a, _ in a })
+        XCTAssertEqual(d["user-agent"], LiveOptions.defaultUserAgent)
     }
 }
 

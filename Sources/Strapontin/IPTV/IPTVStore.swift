@@ -324,7 +324,7 @@ final class IPTVStore: ObservableObject {
         guard let url else { throw URLError(.badURL) }
         // délai d'inactivité : un serveur bloqué ne laisse pas un chargement sans fin
         var req = URLRequest(url: url, timeoutInterval: 25)
-        if let ua = p?.userAgent, !ua.isEmpty { req.setValue(ua, forHTTPHeaderField: "User-Agent") }
+        req.setValue((p?.userAgent).flatMap { $0.isEmpty ? nil : $0 } ?? LiveOptions.defaultUserAgent, forHTTPHeaderField: "User-Agent")
         if let r = p?.referer, !r.isEmpty { req.setValue(r, forHTTPHeaderField: "Referer") }
         let (d, resp) = try await URLSession.shared.data(for: req)
         if let code = (resp as? HTTPURLResponse)?.statusCode, !(200..<300).contains(code) {
@@ -393,6 +393,37 @@ final class IPTVStore: ObservableObject {
         let url = dir.appendingPathComponent("Strapontin-noms-des-chaines.tsv")
         guard (try? lines.joined(separator: "\n").write(to: url, atomically: true, encoding: .utf8)) != nil else { return nil }
         return url
+    }
+
+    /// « Tester la connexion » : ce qui se passe quand on contacte le serveur, sans afficher l'adresse ni les identifiants.
+    static func testConnection(_ p: IPTVPlaylist) async -> String {
+        let ua = p.userAgent.isEmpty ? LiveOptions.defaultUserAgent : p.userAgent
+        let target: URL?
+        if let account = XtreamAccount.from(playlistURL: p.source) { target = account.api("get_server_info") ?? URL(string: p.source) }
+        else { target = URL(string: p.source) }
+        guard let url = target, url.scheme?.hasPrefix("http") == true else {
+            return FileManager.default.fileExists(atPath: (p.source as NSString).expandingTildeInPath) ? "Fichier local : lisible." : "Ni une adresse ni un fichier existant."
+        }
+        let port = url.port.map { ":\($0)" } ?? (url.scheme == "https" ? " (443)" : " (80)")
+        var lines = ["Serveur \(url.scheme ?? "")\(port) · User-Agent « \(ua) »"]
+        let t0 = Date()
+        do {
+            var req = URLRequest(url: url, timeoutInterval: 20)
+            req.setValue(ua, forHTTPHeaderField: "User-Agent")
+            if !p.referer.isEmpty { req.setValue(p.referer, forHTTPHeaderField: "Referer") }
+            let (d, resp) = try await URLSession.shared.data(for: req)
+            let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            lines.append("Réponse HTTP \(code) en \(String(format: "%.1f", Date().timeIntervalSince(t0))) s, \(ByteCountFormatter.string(fromByteCount: Int64(d.count), countStyle: .file))")
+            if XtreamAccount.from(playlistURL: p.source) != nil,
+               let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any], let info = j["user_info"] as? [String: Any] {
+                let auth = "\(info["auth"] ?? "")" == "1"
+                lines.append(auth ? "Compte reconnu · état : \(info["status"] ?? "?")" : "Identifiants refusés par le serveur")
+            }
+            lines.append((200..<300).contains(code) ? "✓ Connexion OK" : "✗ " + explain(NSError(domain: "IPTV", code: code)))
+        } catch {
+            lines.append("✗ " + explain(error))
+        }
+        return lines.joined(separator: "\n")
     }
 
     func channel(_ id: String) -> IPTVEntry? { channelByID[id] ?? groupOf[id].flatMap { channelByID[$0] } }
