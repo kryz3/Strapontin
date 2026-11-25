@@ -32,6 +32,13 @@ final class AppSettings: ObservableObject {
     @Published var passthrough: Bool { didSet { d.set(passthrough, forKey: "passthrough") } }
     @Published var audioLangs: String { didSet { d.set(audioLangs, forKey: "audioLangs") } }
     @Published var subLangs: String { didSet { d.set(subLangs, forKey: "subLangs") } }
+    /// Sous-titres en ligne (OpenSubtitles.com) : clé API et langues cherchées, dans l'ordre.
+    @Published var openSubtitlesKey: String { didSet { d.set(openSubtitlesKey, forKey: "openSubtitlesKey") } }
+    @Published var onlineSubLangs: String { didSet { d.set(onlineSubLangs, forKey: "onlineSubLangs") } }
+    var effectiveOpenSubtitlesKey: String {
+        let k = openSubtitlesKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        return k.isEmpty ? Secrets.openSubtitlesKey : k
+    }
     @Published var volume: Double { didSet { d.set(volume, forKey: "volume") } }
 
     @Published var qbitEnabled: Bool { didSet { d.set(qbitEnabled, forKey: "qbitEnabled") } }
@@ -52,6 +59,8 @@ final class AppSettings: ObservableObject {
         passthrough = d.object(forKey: "passthrough") as? Bool ?? false
         audioLangs = d.string(forKey: "audioLangs") ?? "fre,fra,fr,eng,en"
         subLangs = d.string(forKey: "subLangs") ?? "fre,fra,fr"
+        openSubtitlesKey = d.string(forKey: "openSubtitlesKey") ?? ""
+        onlineSubLangs = d.string(forKey: "onlineSubLangs") ?? "fr,en"
         volume = d.object(forKey: "volume") as? Double ?? 100
         qbitEnabled = d.object(forKey: "qbitEnabled") as? Bool ?? false
         qbitURL = d.string(forKey: "qbitURL") ?? "http://127.0.0.1:8080"

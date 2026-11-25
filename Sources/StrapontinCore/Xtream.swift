@@ -163,7 +163,23 @@ public enum XtreamParser {
                                       url: account.episodeURL(id, ext: ext)))
             }
         }
-        return out.sorted { ($0.season, $0.episode) < ($1.season, $1.episode) }
+        return renumberAbsolute(out.sorted { ($0.season, $0.episode) < ($1.season, $1.episode) })
+    }
+
+    /// Certains fournisseurs numérotent les épisodes d'un bout à l'autre de la série (saison 2 : 23, 24…) : on les
+    /// ramène à la numérotation par saison de TMDb (1, 2…) quand une saison reprend exactement là où la précédente
+    /// s'arrête. Une saison incomplète (5 à 10 seulement) garde ses numéros.
+    public static func renumberAbsolute(_ list: [VODEpisode]) -> [VODEpisode] {
+        var out = list
+        let lastOf = Dictionary(grouping: list, by: \.season).mapValues { $0.map(\.episode).max() ?? 0 }
+        for s in Set(list.map(\.season)) where s > 1 {
+            let idx = out.indices.filter { out[$0].season == s }.sorted { out[$0].episode < out[$1].episode }
+            let nums = idx.map { out[$0].episode }
+            guard let first = nums.first, first > 1, let prev = lastOf[s - 1], first == prev + 1,
+                  nums == Array(first..<(first + nums.count)) else { continue }
+            for (i, j) in idx.enumerated() { out[j].episode = i + 1 }
+        }
+        return out
     }
 }
 

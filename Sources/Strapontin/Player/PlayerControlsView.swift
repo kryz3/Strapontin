@@ -27,6 +27,9 @@ protocol PlayerActions: AnyObject {
     func selectVersion(_ id: String)
     /// Ajouter un fichier de sous-titres (.srt, .ass, .vtt) à ce qu'on regarde.
     func addSubtitleFile()
+    /// Sous-titres en ligne (OpenSubtitles) : chercher, puis choisir.
+    func searchSubtitles()
+    func pickOnlineSubtitle(_ fileId: Int)
     func select(_ track: Track?, type: String)
     func toggleInfo()
     func refreshTracks()
@@ -105,6 +108,14 @@ struct PlayerControlsView: View {
                     .transition(.move(edge: .trailing).combined(with: .opacity))
             }
 
+            if let v = model.volumeShown {
+                Label("\(Int(v)) %", systemImage: v == 0 ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                    .font(.system(size: 13, weight: .semibold).monospacedDigit()).foregroundStyle(.white)
+                    .padding(.horizontal, 14).padding(.vertical, 8)
+                    .background(.ultraThinMaterial, in: Capsule())
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top).padding(.top, 20)
+                    .transition(.opacity).allowsHitTesting(false)
+            }
             if let n = model.live?.notice, !(model.live?.reconnecting ?? false) {
                 Label(n, systemImage: "dial.medium")
                     .font(.system(size: 12, weight: .semibold)).foregroundStyle(.white)
@@ -343,7 +354,8 @@ struct PlayerControlsView: View {
                     .popover(isPresented: $showTracks, arrowEdge: .top) {
                         TracksPanel(audio: model.audioTracks, subs: model.subTracks, versions: model.versions,
                                     currentVersion: model.currentVersion, selectVersion: actions.selectVersion,
-                                    addSubtitles: actions.addSubtitleFile) { t, type in actions.select(t, type: type) }
+                                    addSubtitles: actions.addSubtitleFile, online: model.onlineSubs,
+                                    searchOnline: actions.searchSubtitles, pickOnline: actions.pickOnlineSubtitle) { t, type in actions.select(t, type: type) }
                     }
                     VolumeControl(volume: model.volume, set: actions.setVolume, mute: actions.toggleMute)
                     Button(action: actions.toggleMini) {
@@ -383,12 +395,17 @@ struct TracksPanel: View {
     var currentVersion: String?
     var selectVersion: (String) -> Void = { _ in }
     var addSubtitles: (() -> Void)?
+    var online: OnlineSubs = .idle
+    var searchOnline: (() -> Void)?
+    var pickOnline: (Int) -> Void = { _ in }
     let select: (Track?, String) -> Void
 
     init(audio: [Track], subs: [Track], qualities: [ChannelVariant] = [], currentQuality: String? = nil,
          selectQuality: @escaping (String) -> Void = { _ in }, versions: [VersionOption] = [], currentVersion: String? = nil,
          selectVersion: @escaping (String) -> Void = { _ in }, addSubtitles: (() -> Void)? = nil,
+         online: OnlineSubs = .idle, searchOnline: (() -> Void)? = nil, pickOnline: @escaping (Int) -> Void = { _ in },
          select: @escaping (Track?, String) -> Void) {
+        self.online = online; self.searchOnline = searchOnline; self.pickOnline = pickOnline
         self.audio = audio; self.subs = subs; self.qualities = qualities; self.currentQuality = currentQuality
         self.selectQuality = selectQuality; self.versions = versions; self.currentVersion = currentVersion
         self.selectVersion = selectVersion; self.addSubtitles = addSubtitles; self.select = select
@@ -450,11 +467,32 @@ struct TracksPanel: View {
                         }
                         Button("Ajouter un fichier…", action: add).buttonStyle(.link).font(.system(size: 12)).padding(.horizontal, 10).padding(.top, 6)
                     }
+                    if type == "sub", let search = searchOnline { onlineSection(search) }
                 }
             }
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// « Chercher en ligne » : les sous-titres du titre chez OpenSubtitles, langue préférée d'abord.
+    @ViewBuilder private func onlineSection(_ search: @escaping () -> Void) -> some View {
+        switch online {
+        case .idle:
+            Button("Chercher en ligne…", action: search).buttonStyle(.link).font(.system(size: 12)).padding(.horizontal, 10).padding(.top, 4)
+        case .searching:
+            HStack(spacing: 6) { ProgressView().controlSize(.small); Text("Recherche…").font(.system(size: 12)) }.padding(10)
+        case .message(let m):
+            Text(m).font(.system(size: 11)).foregroundStyle(.secondary).padding(.horizontal, 10).padding(.top, 6)
+                .fixedSize(horizontal: false, vertical: true)
+        case .results(let list):
+            Text("EN LIGNE").font(.system(size: 10, weight: .heavy)).foregroundStyle(.secondary).padding(.horizontal, 10).padding(.top, 8)
+            ForEach(list) { r in
+                row("\(r.language.uppercased()) · \(r.release)" + (r.hearingImpaired ? " · SME" : "") + (r.machineTranslated ? " · traduction auto" : ""),
+                    selected: false) { pickOnline(r.id) }
+                    .help("\(r.release) — \(r.downloads) téléchargements")
+            }
+        }
     }
 
     private func row(_ label: String, selected: Bool, action: @escaping () -> Void) -> some View {
@@ -472,41 +510,47 @@ struct TracksPanel: View {
     }
 }
 
+/// Le son, comme dans QuickTime : l'icône (clic : couper / remettre) et un petit curseur toujours visible à côté.
+/// Rien ne se déroule ni ne bouge ; la molette sur le curseur et ↑ ↓ règlent aussi le volume.
 struct VolumeControl: View {
     let volume: Double
     let set: (Double) -> Void
     let mute: () -> Void
-    @State private var open = false
-    @State private var closeTask: Task<Void, Never>?
 
     var body: some View {
-        // zone de survol de taille fixe : le curseur qui apparaît ne déplace rien, donc pas de va-et-vient
         HStack(spacing: 8) {
             Button(action: mute) {
                 Image(systemName: volume == 0 ? "speaker.slash.fill" : volume < 50 ? "speaker.wave.1.fill" : "speaker.wave.2.fill")
                     .font(.system(size: 13, weight: .semibold))
+                    .frame(width: 16)
             }
             .buttonStyle(GlassCircle(size: 38))
-            Slider(value: Binding(get: { volume }, set: set), in: 0...150)
-                .frame(width: 100).controlSize(.small).tint(.white)
-                .opacity(open ? 1 : 0)
-                .allowsHitTesting(open)
+            .help(volume == 0 ? "Remettre le son (M)" : "Couper le son (M)")
+            Slider(value: Binding(get: { min(volume, 100) }, set: set), in: 0...100)
+                .frame(width: 84).controlSize(.mini).tint(.white)
+                .overlay(ScrollCatcher { delta in set(min(150, max(0, volume + delta * 2))) })
+                .help("Volume : \(Int(volume)) % (↑ ↓, molette)")
         }
-        .frame(width: 146, alignment: .leading)
-        .contentShape(Rectangle())
-        .onHover { h in
-            closeTask?.cancel()
-            if h {
-                withAnimation(.easeOut(duration: 0.15)) { open = true }
-            } else {
-                // un léger délai avant de replier : un passage du pointeur en bord de zone ne fait pas clignoter
-                closeTask = Task { @MainActor in
-                    try? await Task.sleep(for: .milliseconds(450))
-                    if !Task.isCancelled { withAnimation(.easeOut(duration: 0.2)) { open = false } }
-                }
-            }
+        .fixedSize()
+    }
+}
+
+/// La molette (ou deux doigts sur le trackpad) au-dessus d'une vue, sans gêner les clics.
+private struct ScrollCatcher: NSViewRepresentable {
+    let onScroll: (Double) -> Void
+    final class V: NSView {
+        var onScroll: (Double) -> Void = { _ in }
+        override func scrollWheel(with e: NSEvent) {
+            let d = e.hasPreciseScrollingDeltas ? e.scrollingDeltaY / 4 : e.scrollingDeltaY
+            if d != 0 { onScroll(Double(d)) }
+        }
+        override func hitTest(_ point: NSPoint) -> NSView? {
+            // seulement pour la molette : les clics et glissés vont au curseur
+            NSApp.currentEvent?.type == .scrollWheel ? super.hitTest(point) : nil
         }
     }
+    func makeNSView(context: Context) -> V { let v = V(); v.onScroll = onScroll; return v }
+    func updateNSView(_ v: V, context: Context) { v.onScroll = onScroll }
 }
 
 struct GlassCircle: ButtonStyle {

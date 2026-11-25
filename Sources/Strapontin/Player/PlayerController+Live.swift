@@ -265,3 +265,70 @@ extension PlayerController {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.refreshTracks() }
     }
 }
+
+// MARK: - Sous-titres en ligne (OpenSubtitles)
+
+enum OnlineSubs: Equatable {
+    case idle
+    case searching
+    case results([SubtitleResult])
+    case message(String)
+}
+
+extension PlayerController {
+    /// Cherche les sous-titres du titre en cours (film, ou série + saison + épisode TMDb), quelle que soit la source.
+    func searchSubtitles() {
+        let s = AppSettings.shared
+        let key = s.effectiveOpenSubtitlesKey
+        guard !key.isEmpty else {
+            model.onlineSubs = .message("Ajoute une clé OpenSubtitles dans Réglages › Lecture (gratuite sur opensubtitles.com).")
+            return
+        }
+        let langs = s.onlineSubLangs.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces).lowercased() }.filter { !$0.isEmpty }
+        let client = OpenSubtitlesClient(apiKey: key, userAgent: "Strapontin v\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0")")
+        let title = currentTitle
+        let query = index < queue.count ? queue[index].title : ""
+        model.onlineSubs = .searching
+        Task {
+            do {
+                let r: [SubtitleResult]
+                if let t = title, let e = t.episode {
+                    r = try await client.search(parentTmdbId: t.tmdbId, season: e.season, episode: e.episode, languages: langs)
+                } else if let t = title {
+                    r = try await client.search(tmdbId: t.tmdbId, languages: langs)
+                } else {
+                    r = try await client.search(query: query, languages: langs)
+                }
+                model.onlineSubs = r.isEmpty ? .message("Aucun sous-titre trouvé en \(langs.joined(separator: ", ")).") : .results(Array(r.prefix(15)))
+            } catch {
+                model.onlineSubs = .message("Recherche impossible : \(error.localizedDescription)")
+            }
+        }
+    }
+
+    /// Télécharge le sous-titre choisi (gardé en cache) et l'affiche tout de suite.
+    func pickOnlineSubtitle(_ fileId: Int) {
+        let s = AppSettings.shared
+        let client = OpenSubtitlesClient(apiKey: s.effectiveOpenSubtitlesKey)
+        let dir = LibraryStore.shared.cacheDir.appendingPathComponent("sous-titres", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        Task {
+            do {
+                let cached = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil))?
+                    .first { $0.lastPathComponent.hasPrefix("\(fileId)-") }
+                let url: URL
+                if let cached { url = cached } else {
+                    let (data, name) = try await client.download(fileId: fileId)
+                    url = dir.appendingPathComponent("\(fileId)-\((name as NSString).lastPathComponent)")
+                    try data.write(to: url)
+                }
+                player.command(["sub-add", url.path, "select"])
+                try? await Task.sleep(for: .milliseconds(400))
+                refreshTracks()
+                model.onlineSubs = .idle
+            } catch {
+                model.onlineSubs = .message("Téléchargement impossible : \(error.localizedDescription)")
+            }
+        }
+    }
+}

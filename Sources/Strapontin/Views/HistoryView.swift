@@ -78,14 +78,16 @@ struct HistoryView: View {
 
     private func streamRow(_ r: StreamRecord) -> some View {
         let p = iptv.progress[r.key]
-        let media = r.mediaKey.flatMap { store.media[$0] }
+        let owned = r.mediaKey.flatMap { store.media[$0] }
+        let media = r.mediaKey.flatMap { TitleArt.shared.media($0) }
+        let title = media?.title ?? r.title
+        let ep = Watch.title(fromStreamKey: r.key)?.episode
         let done = p.map { $0[1] > 0 && $0[0] >= $0[1] * 0.95 } ?? false
         return HStack(spacing: 16) {
             ZStack(alignment: .bottomLeading) {
                 Color(white: 0.16)
-                if let m = media { LocalImage(url: store.backdropURL(m)) }
-                Image(systemName: "play.tv").font(.system(size: 22)).foregroundStyle(.white.opacity(media == nil ? 0.5 : 0))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                if let m = owned { LocalImage(url: store.backdropURL(m)) }
+                else if let b = media?.backdropPath { RemoteImage(url: TMDbClient.imageURL(b, size: "w300")) }
                 if let p, p[1] > 0, p[0] > 0, !done {
                     Capsule().fill(.white.opacity(0.25)).frame(height: 3)
                         .overlay(alignment: .leading) {
@@ -97,8 +99,8 @@ struct HistoryView: View {
             .frame(width: 160, height: 90)
             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             VStack(alignment: .leading, spacing: 4) {
-                Text(r.title).font(.system(size: 15, weight: .semibold)).lineLimit(1)
-                Text(["En streaming", r.subtitle].compactMap { $0 }.joined(separator: " · "))
+                Text(title).font(.system(size: 15, weight: .semibold)).lineLimit(1)
+                Text([ep.map { "S\($0.season), É\($0.episode)" } ?? r.subtitle, "en streaming"].compactMap { $0 }.joined(separator: " · "))
                     .font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1)
                 Text((done ? "Vu · " : p.map { "Arrêté à \(formatTime($0[0])) · " } ?? "") + r.date.formatted(date: .omitted, time: .shortened))
                     .font(.system(size: 11)).foregroundStyle(.secondary)
@@ -119,6 +121,7 @@ struct HistoryView: View {
         }
         .padding(8)
         .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(.white.opacity(0.04)))
+        .onAppear { if let k = r.mediaKey { TitleArt.shared.request(k) } }
     }
 
     private func fileRow(_ f: MediaFile, _ item: LibraryItem, _ date: Date) -> some View {

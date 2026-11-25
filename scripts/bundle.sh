@@ -17,7 +17,7 @@ cd "$(dirname "$0")/.."
 if [ -f .env ]; then
   while IFS='=' read -r k v; do
     case "$k" in
-      TMDB_API_KEY|STRAPONTIN_VERSION|STRAPONTIN_BUILD|STRAPONTIN_FEED_URL|GITHUB_REPOSITORY|INDEXER_URL|INDEXER_API_PATH|INDEXER_API_KEY)
+      TMDB_API_KEY|OPENSUBTITLES_API_KEY|STRAPONTIN_VERSION|STRAPONTIN_BUILD|STRAPONTIN_FEED_URL|GITHUB_REPOSITORY|INDEXER_URL|INDEXER_API_PATH|INDEXER_API_KEY)
         v="${v%\"}"; v="${v#\"}"
         [ -z "${!k:-}" ] && export "$k=$v" ;;
     esac
@@ -48,6 +48,7 @@ pb() { /usr/libexec/PlistBuddy -c "$1" "$PLIST" >/dev/null; }
 [ -n "${STRAPONTIN_VERSION:-}" ] && pb "Set :CFBundleShortVersionString $STRAPONTIN_VERSION"
 [ -n "${STRAPONTIN_BUILD:-}" ] && pb "Set :CFBundleVersion $STRAPONTIN_BUILD"
 [ -n "${TMDB_API_KEY:-}" ] && pb "Add :StrapontinTMDbKey string $TMDB_API_KEY"
+[ -n "${OPENSUBTITLES_API_KEY:-}" ] && pb "Add :StrapontinOpenSubtitlesKey string $OPENSUBTITLES_API_KEY"
 [ -n "${STRAPONTIN_FEED_URL:-}" ] && pb "Add :SUFeedURL string $STRAPONTIN_FEED_URL"
 if [ -n "${CI:-}${GITHUB_ACTIONS:-}" ]; then
   [ -n "${INDEXER_URL:-}${INDEXER_API_PATH:-}${INDEXER_API_KEY:-}" ] && echo "INDEXER_* ignorés en CI : une release publique ne contient pas d'indexeur" >&2

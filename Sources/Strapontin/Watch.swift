@@ -96,7 +96,7 @@ enum Watch {
             let streams = SeriesStreams.of(k.tmdbId)
             await streams.load(tmdbId: k.tmdbId, titles: [title], year: year)
             if let v = streams.episode(season: e.season, episode: e.episode) {
-                IPTVVOD.play(url: v.url, mediaKey: k.mediaKey, title: title, subtitle: "Saison \(e.season), épisode \(e.episode)",
+                IPTVVOD.play(url: v.url, mediaKey: k.mediaKey, title: title, subtitle: PlayItem(stream: v.url, title: title, key: k).subtitle,
                              progressKey: streamKey(k))
                 return true
             }
@@ -135,7 +135,12 @@ enum ContinueWatching {
         // les fiches touchées, par la bibliothèque ou le streaming
         var titles: [String: (title: String, year: Int?, backdrop: String?)] = [:]
         for i in lib.items { if let m = i.media { titles[m.key] = (m.title, m.year, m.backdropPath) } }
-        for r in iptv.streams { if let k = r.mediaKey, titles[k] == nil { titles[k] = (r.title, nil, nil) } }
+        // regardé en streaming : la fiche TMDb (titre, année, image), demandée au besoin
+        for r in iptv.streams {
+            guard let k = r.mediaKey, titles[k] == nil else { continue }
+            if let m = TitleArt.shared.media(k) { titles[k] = (m.title, m.year, m.backdropPath) }
+            else { TitleArt.shared.request(k); titles[k] = (r.title, nil, nil) }
+        }
         var out: [ContinueEntry] = []
         for (mk, info) in titles {
             guard let (k, id) = TMDbLink.parseKey(mk), kind == nil || kind == k else { continue }
@@ -177,27 +182,34 @@ enum ContinueWatching {
 struct ContinueCard: View {
     let entry: ContinueEntry
     @EnvironmentObject var store: LibraryStore
+    @ObservedObject private var art = TitleArt.shared
     @State private var hover = false
+
+    /// L'image de l'épisode (TMDb) quand on la connaît.
+    private var episodeStill: String? {
+        guard let e = entry.key.episode else { return nil }
+        return SeriesModel.of(entry.key.tmdbId).info(e.season, e.episode)?.stillPath
+    }
+
+    private var title: String { art.media(entry.key.mediaKey)?.title ?? entry.title }
 
     var body: some View {
         Button {
             // pas de source pour l'instant : la fiche, qui propose de le télécharger
-            Task { if !(await Watch.playBest(entry.key, title: entry.title, year: entry.year)) { GoTo.open(entry.key.mediaKey) } }
+            Task { if !(await Watch.playBest(entry.key, title: title, year: entry.year ?? art.media(entry.key.mediaKey)?.year)) { GoTo.open(entry.key.mediaKey) } }
         } label: {
             VStack(alignment: .leading, spacing: 9) {
                 ZStack(alignment: .bottomLeading) {
                     Color(white: 0.15)
                     if let m = store.media[entry.key.mediaKey], m.backdropPath != nil {
                         LocalImage(url: store.backdropURL(m))
-                    } else if let b = entry.backdrop {
-                        RemoteImage(url: TMDbClient.imageURL(b, size: "w780"))
-                    } else {
-                        GenericPoster(title: entry.title, kind: entry.key.kind, subtitle: entry.label)
+                    } else if let still = episodeStill ?? entry.backdrop ?? art.media(entry.key.mediaKey)?.backdropPath {
+                        RemoteImage(url: TMDbClient.imageURL(still, size: "w780"))
                     }
                     LinearGradient(colors: [.clear, .black.opacity(0.75)], startPoint: .center, endPoint: .bottom)
                     HStack(alignment: .bottom) {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(entry.title).font(.system(size: 15, weight: .bold)).lineLimit(1)
+                            Text(title).font(.system(size: 15, weight: .bold)).lineLimit(1)
                             if let l = entry.label { Text(l).font(.system(size: 11, weight: .semibold)).opacity(0.8) }
                         }
                         Spacer()
@@ -232,6 +244,11 @@ struct ContinueCard: View {
         }
         .buttonStyle(.plain)
         .onHover { h in withAnimation(.easeOut(duration: 0.18)) { hover = h } }
+        .onAppear {
+            TitleArt.shared.request(entry.key.mediaKey)
+            // l'image et le nom de l'épisode viennent de TMDb : la saison est demandée une fois
+            if let e = entry.key.episode { SeriesModel.of(entry.key.tmdbId).prepareNext(after: e.season) }
+        }
         .contextMenu {
             NavigationLink(value: entry.key.mediaKey) { Text("Voir la fiche") }
             Button("Retirer d'« À suivre »") { ContinueWatching.hide(entry.key.mediaKey) }
@@ -250,6 +267,28 @@ struct ContinueShelf: View {
         let entries = ContinueWatching.entries(kind: kind)
         if !entries.isEmpty {
             Shelf(title: "À suivre") { ForEach(entries) { ContinueCard(entry: $0) } }
+        }
+    }
+}
+
+/// Fiches TMDb des titres qu'on affiche sans les avoir dans la bibliothèque (regardés en streaming) : titre, année,
+/// images. Tout ce qui s'affiche vient d'ici ou de la bibliothèque, jamais du fournisseur IPTV.
+@MainActor
+final class TitleArt: ObservableObject {
+    static let shared = TitleArt()
+    @Published private(set) var media: [String: Media] = [:]
+    private var asked = Set<String>()
+
+    func media(_ mediaKey: String) -> Media? { LibraryStore.shared.media[mediaKey] ?? media[mediaKey] }
+
+    /// Demande la fiche une fois (TMDb, avec son cache disque).
+    func request(_ mediaKey: String) {
+        guard media(mediaKey) == nil, asked.insert(mediaKey).inserted, let (kind, id) = TMDbLink.parseKey(mediaKey) else { return }
+        let s = AppSettings.shared
+        guard !s.effectiveTMDbKey.isEmpty else { return }
+        let c = TMDbClient(key: s.effectiveTMDbKey, language: s.tmdbLanguage, omdbKey: s.omdbKey)
+        Task {
+            if let m = try? await c.details(kind, id: id) { media[mediaKey] = m }
         }
     }
 }

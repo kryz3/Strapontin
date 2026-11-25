@@ -27,6 +27,7 @@ puis remplis ce dont tu as besoin. Exemple avec des valeurs **factices** :
 
 ```sh
 TMDB_API_KEY=0123456789abcdef0123456789abcdef
+OPENSUBTITLES_API_KEY=cle-opensubtitles-factice
 INDEXER_URL=https://indexeur.exemple
 INDEXER_API_PATH=/api
 INDEXER_API_KEY=ma-cle-api-factice
@@ -35,6 +36,7 @@ INDEXER_API_KEY=ma-cle-api-factice
 | Variable | Rôle |
 |---|---|
 | `TMDB_API_KEY` | clé TMDb : fiches, affiches, épisodes, Découvrir, recherche dans le catalogue |
+| `OPENSUBTITLES_API_KEY` | clé OpenSubtitles.com (gratuite, compte puis « API consumers ») : sous-titres en ligne dans le lecteur. Facultative : chacun peut aussi la saisir dans Réglages › Lecture |
 | `INDEXER_URL` | adresse de base de l'indexeur (`https://…`) |
 | `INDEXER_API_PATH` | chemin de son API Torznab (souvent `/api`) ; l'app appelle `INDEXER_URL` + `INDEXER_API_PATH` |
 | `INDEXER_API_KEY` | ta clé API sur cet indexeur |

@@ -55,7 +55,10 @@ extension PlayItem {
     /// Un épisode en streaming, rattaché à son titre.
     @MainActor
     init(stream url: String, title: String, key: TitleKey) {
-        let sub = key.episode.map { "Saison \($0.season), épisode \($0.episode)" }
+        // le nom de l'épisode vient de TMDb, comme pour un fichier
+        let sub = key.episode.map { e in
+            "Saison \(e.season), épisode \(e.episode)" + (SeriesModel.of(key.tmdbId).info(e.season, e.episode)?.name.map { " · \($0)" } ?? "")
+        }
         self.init(path: url, title: title, subtitle: sub, start: Watch.resume(key), progressKey: Watch.streamKey(key))
     }
 }
@@ -85,6 +88,10 @@ final class PlayerModel: ObservableObject {
     @Published var subTracks: [Track] = []
     /// Streaming à la demande : versions du titre en cours, et celle qu'on lit.
     @Published var versions: [VersionOption] = []
+    /// Sous-titres en ligne : recherche en cours, résultats, ou message.
+    @Published var onlineSubs: OnlineSubs = .idle
+    /// Volume affiché brièvement après un réglage (↑ ↓, molette, curseur).
+    @Published var volumeShown: Double?
     @Published var currentVersion: String?
     @Published var info: String?
     @Published var isFullScreen = false
@@ -157,6 +164,7 @@ final class PlayerController: NSObject, NSWindowDelegate {
     var alternateIndex = 0
     var previousChannel: IPTVEntry?
     var liveNotice: String?
+    var volumeTimer: Timer?
     var noticeTimer: Timer?
     var numberTimer: Timer?
 
@@ -365,6 +373,7 @@ final class PlayerController: NSObject, NSWindowDelegate {
         updateSeriesContext()
         model.versions = []
         model.currentVersion = nil
+        model.onlineSubs = .idle
         if item.live == nil, item.progressKey != nil { Task { await loadVersions() } }
         startThumbnails(item.path)
         let file = currentFile
@@ -840,7 +849,15 @@ extension PlayerController: PlayerActions {
         model.position = s
         advance()
     }
-    func setVolume(_ v: Double) { model.volume = v; player.setVolume(v) }
+    func setVolume(_ v: Double) {
+        model.volume = v
+        player.setVolume(v)
+        model.volumeShown = v
+        volumeTimer?.invalidate()
+        volumeTimer = Timer.scheduledTimer(withTimeInterval: 1.2, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated { withAnimation(.easeOut(duration: 0.2)) { self?.model.volumeShown = nil } }
+        }
+    }
     func toggleMute() { player.toggleMute() }
     func toggleFullScreen() {
         if ownsWindow { window?.toggleFullScreen(nil) } else { player.command(["cycle", "fullscreen"]) }

@@ -339,7 +339,7 @@ struct EpisodeRow: View {
 
     private func playStream(_ v: VODEpisode) {
         IPTVVOD.play(url: v.url, mediaKey: series.key, title: media.title,
-                     subtitle: "Saison \(v.season), épisode \(v.episode)", progressKey: streamKey(v))
+                     subtitle: PlayItem(stream: v.url, title: media.title, key: titleKey).subtitle, progressKey: streamKey(v))
     }
     private var file: MediaFile? { snap.files[episode] }
     private var link: String { EpisodeLink.value(series.tmdbId, snap.season, episode) }

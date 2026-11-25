@@ -136,6 +136,16 @@ private struct PlaybackSettings: View {
                 Text("Lecture directe par mpv : le fichier est décodé tel quel, sans transcodage ni recompression. Les réglages s'appliquent à la prochaine vidéo ouverte.")
                     .foregroundStyle(.secondary)
             }
+            Section {
+                SecureField("Clé API OpenSubtitles", text: $settings.openSubtitlesKey,
+                            prompt: Text(Secrets.openSubtitlesKey.isEmpty ? "à créer sur opensubtitles.com" : "fournie avec l'app"))
+                TextField("Langues cherchées", text: $settings.onlineSubLangs, prompt: Text("fr,en"))
+            } header: {
+                Text("Sous-titres en ligne")
+            } footer: {
+                Text("Dans le lecteur, panneau Audio et sous-titres › « Chercher en ligne » : les sous-titres du film ou de l'épisode, quelle que soit la source. Clé gratuite : compte sur opensubtitles.com, puis « API consumers ». Sans compte, 5 téléchargements par jour.")
+                    .foregroundStyle(.secondary)
+            }
         }
         .formStyle(.grouped)
     }

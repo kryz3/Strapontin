@@ -55,3 +55,42 @@ final class WatchStateTests: XCTestCase {
         XCTAssertEqual(c?.0, EpisodeKey(1, 5)); XCTAssertEqual(c?.resume, 0)
     }
 }
+
+/// Cas relevés par l'audit du modèle : numérotation, spéciaux, homonymes, années.
+final class ModelAuditTests: XCTestCase {
+    func ep(_ s: Int, _ e: Int) -> VODEpisode { VODEpisode(id: "\(s)-\(e)", season: s, episode: e, title: "", plot: nil, still: nil, duration: nil, url: "u") }
+
+    func testAbsoluteNumberingIsBroughtBackToSeasons() {
+        let list = (1...22).map { ep(1, $0) } + (23...44).map { ep(2, $0) }
+        let r = XtreamParser.renumberAbsolute(list)
+        XCTAssertEqual(r.filter { $0.season == 2 }.map(\.episode), Array(1...22))
+        XCTAssertEqual(r.filter { $0.season == 1 }.map(\.episode), Array(1...22))
+        // saison incomplète chez le fournisseur : ses numéros restent
+        let partial = (1...10).map { ep(1, $0) } + (5...8).map { ep(2, $0) }
+        XCTAssertEqual(XtreamParser.renumberAbsolute(partial).filter { $0.season == 2 }.map(\.episode), [5, 6, 7, 8])
+    }
+
+    func testSpecialsNeverChainIn() {
+        let src = CrossSource.sources(files: [EpisodeKey(0, 1): "/special", EpisodeKey(1, 1): "/s1e1"], streams: [:])
+        XCTAssertEqual(CrossSource.next(after: EpisodeKey(1, 1), known: [EpisodeKey(0, 2)], sources: src)?.0, nil)
+        XCTAssertNil(CrossSource.previous(before: EpisodeKey(1, 1), sources: src))
+    }
+
+    func testHomonymsAndYearsDoNotMix() {
+        let l = VODLookup([
+            VODRef(id: "us", kind: .series, name: "EN| The Office (2005)", tmdb: 2316),
+            VODRef(id: "uk", kind: .series, name: "EN| The Office (2001)", tmdb: 2996),
+            VODRef(id: "noid", kind: .series, name: "FR| The Office (2005)"),
+            VODRef(id: "film", kind: .movie, name: "The Office (2005)"),
+        ])
+        XCTAssertEqual(Set(l.find(kind: .series, tmdbId: 2316, titles: ["The Office"], year: 2005).map(\.id)), ["us", "noid"])
+        XCTAssertEqual(l.find(kind: .series, tmdbId: 2996, titles: ["The Office"], year: 2001).map(\.id), ["uk"])
+        XCTAssertFalse(l.find(kind: .series, tmdbId: 2316, titles: ["The Office"], year: 2005).contains { $0.kind == .movie })
+    }
+
+    func testStreamKeysAreTitles() {
+        // la clé de suivi d'une lecture en streaming est celle du titre TMDb, pas celle du flux du fournisseur
+        XCTAssertEqual(TitleKey(id: "tv:1100:4:20"), TitleKey(.tv, 1100, EpisodeKey(4, 20)))
+        XCTAssertNil(TitleKey(id: "xm123"))
+    }
+}
