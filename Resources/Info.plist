@@ -24,7 +24,9 @@
     <key>SUEnableAutomaticChecks</key><true/>
     <key>NSAppTransportSecurity</key>
     <!-- les serveurs IPTV sont ceux que l'utilisateur saisit, souvent en http simple : on ne peut pas les lister.
-         TMDb, GitHub et les mises à jour restent en https dans le code. -->
-    <dict><key>NSAllowsLocalNetworking</key><true/><key>NSAllowsArbitraryLoads</key><true/></dict>
+         TMDb, GitHub et les mises à jour restent en https dans le code.
+         Seule clé : avec NSAllowsLocalNetworking (ou …ForMedia, …InWebContent) à côté, macOS ignore NSAllowsArbitraryLoads.
+         Le réseau local reste permis par NSAllowsArbitraryLoads. -->
+    <dict><key>NSAllowsArbitraryLoads</key><true/></dict>
 </dict>
 </plist>

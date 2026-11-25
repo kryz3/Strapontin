@@ -8,6 +8,9 @@ final class InfoPlistTests: XCTestCase {
         let plist = try XCTUnwrap(PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any])
         let ats = try XCTUnwrap(plist["NSAppTransportSecurity"] as? [String: Any])
         XCTAssertEqual(ats["NSAllowsArbitraryLoads"] as? Bool, true)
-        XCTAssertEqual(ats["NSAllowsLocalNetworking"] as? Bool, true)
+        // macOS ignore NSAllowsArbitraryLoads dès qu'une de ces clés est présente : le http serait encore refusé
+        for k in ["NSAllowsLocalNetworking", "NSAllowsArbitraryLoadsForMedia", "NSAllowsArbitraryLoadsInWebContent", "NSExceptionDomains"] {
+            XCTAssertNil(ats[k], k)
+        }
     }
 }
