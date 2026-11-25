@@ -234,6 +234,8 @@ struct StreamButton: View {
     let tmdbId: Int
     let title: String
     var libraryFile: MediaFile? = nil
+    /// Petit bouton (cartes « Pour toi ») plutôt que la grande pastille des fiches.
+    var compact = false
     @ObservedObject private var catalog = IPTVCatalog.shared
     @ObservedObject private var store = IPTVStore.shared
 
@@ -244,11 +246,21 @@ struct StreamButton: View {
             let p = store.progress["stream:" + key]
             let resume = p.map { $0[0] > 30 && $0[0] < $0[1] * 0.95 } ?? false
             HStack(spacing: 8) {
-                PlayPill(title: resume ? "Reprendre en streaming" : "Regarder en streaming", icon: "play.tv") {
-                    IPTVCatalog.play(best, url: url, mediaKey: key, title: title, progressKey: "stream:" + key, libraryFile: libraryFile)
+                if compact {
+                    Button {
+                        IPTVCatalog.play(best, url: url, mediaKey: key, title: title, progressKey: "stream:" + key, libraryFile: libraryFile)
+                    } label: {
+                        SmallPill(title: resume ? "Reprendre en streaming" : "Regarder en streaming", icon: "play.tv", filled: true)
+                    }
+                    .buttonStyle(.plain)
+                    .help(IPTVCatalog.sourceLabel(best))
+                } else {
+                    PlayPill(title: resume ? "Reprendre en streaming" : "Regarder en streaming", icon: "play.tv") {
+                        IPTVCatalog.play(best, url: url, mediaKey: key, title: title, progressKey: "stream:" + key, libraryFile: libraryFile)
+                    }
+                    .help(IPTVCatalog.sourceLabel(best))
                 }
-                .help(IPTVCatalog.sourceLabel(best))
-                if list.count > 1 {
+                if list.count > 1, !compact {
                     Menu {
                         ForEach(list, id: \.id) { v in
                             Button(IPTVCatalog.sourceLabel(v)) {

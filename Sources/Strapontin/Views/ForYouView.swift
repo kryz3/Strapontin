@@ -56,6 +56,7 @@ final class ForYouModel: ObservableObject {
         shown = []
         let t0 = ContinuousClock.now
         await loadGenres(c)
+        await loadStreamedDetails(c)
         let profile = currentProfile()
         var candidates: [TMDbPick] = []
         // titres aimés ou regardés récemment : leurs recommandations, en parallèle
@@ -175,6 +176,25 @@ final class ForYouModel: ObservableObject {
         }
     }
 
+    /// Titres regardés en streaming (IPTV) : leurs genres comptent dans les goûts comme ceux de la bibliothèque.
+    private func streamedTitles() -> [(StreamRecord, Media)] {
+        var seen = Set<String>()
+        return IPTVStore.shared.streams.compactMap { r -> (StreamRecord, Media)? in
+            guard let k = r.mediaKey, seen.insert(k).inserted,
+                  let m = details[k] ?? LibraryStore.shared.media[k] else { return nil }
+            return (r, m)
+        }
+    }
+
+    private func loadStreamedDetails(_ c: TMDbClient) async {
+        var seen = Set<String>()
+        for r in IPTVStore.shared.streams.prefix(30) {
+            guard let k = r.mediaKey, seen.insert(k).inserted, details[k] == nil, LibraryStore.shared.media[k] == nil,
+                  let (kind, id) = TMDbLink.parseKey(k) else { continue }
+            if let m = try? await c.details(kind, id: id) { details[k] = m }
+        }
+    }
+
     private func genreIds(_ m: Media) -> [Int] {
         let map = genreMaps[m.kind] ?? [:]
         return m.genres.compactMap { map[$0] }
@@ -192,6 +212,11 @@ final class ForYouModel: ObservableObject {
             signals.append(.init(kind: m.kind, genreIds: genreIds(m), year: m.year, weight: w))
         }
         let library = Set(LibraryStore.shared.items.compactMap { $0.media.map { Media.key($0.kind, $0.tmdbId) } })
+        for (r, m) in streamedTitles() where !library.contains(Media.key(m.kind, m.tmdbId)) {
+            var w = 1.5
+            if now - r.date.timeIntervalSince1970 < 30 * 86400 { w += 1 }
+            signals.append(.init(kind: m.kind, genreIds: genreIds(m), year: m.year, weight: w))
+        }
         for f in TrackerModel.shared.follows where !library.contains(f.id) {
             if let m = LibraryStore.shared.media[f.id] { signals.append(.init(kind: m.kind, genreIds: genreIds(m), year: m.year, weight: 2)) }
         }
@@ -214,6 +239,9 @@ final class ForYouModel: ObservableObject {
         var seen = Set<String>()
         for r in reactions.values.filter({ $0.reaction == .like }).sorted(by: { $0.date > $1.date }).prefix(4) {
             if seen.insert(Media.key(r.kind, r.tmdbId)).inserted { out.append((r.kind, r.tmdbId, r.title)) }
+        }
+        for (_, m) in streamedTitles().prefix(3) where out.count < 6 {
+            if seen.insert(Media.key(m.kind, m.tmdbId)).inserted { out.append((m.kind, m.tmdbId, m.title)) }
         }
         let items = LibraryStore.shared.items.compactMap { i -> (LibraryItem, Media)? in i.media.map { (i, $0) } }
             .sorted { a, b in
@@ -309,6 +337,7 @@ private struct ForYouCard: View {
                         RemoteImage(url: TMDbClient.imageURL(card.posterPath, size: "w342"))
                     }
                     .frame(width: 190, height: 285)
+                    .overlay(alignment: .bottomTrailing) { StreamBadge(mediaKey: card.id) }
                     .clipShape(RoundedRectangle(cornerRadius: Theme.corner, style: .continuous))
                     .shadow(color: .black.opacity(0.5), radius: 18, y: 8)
 
@@ -356,6 +385,7 @@ private struct ForYouCard: View {
 
     private var actions: some View {
         HStack(spacing: 12) {
+            StreamButton(kind: card.kind, tmdbId: card.tmdbId, title: card.title, compact: true)
             if let state = model.downloadState[card.id] {
                 SmallPill(title: state, icon: "arrow.down.circle", filled: false)
             } else if tracker.configured {
