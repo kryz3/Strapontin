@@ -254,3 +254,119 @@ final class IPTVCountryTests: XCTestCase {
         XCTAssertEqual(M3UParser.parse(m3u, playlist: "p").entries.first?.country, "FR")
     }
 }
+
+final class ChannelNameTests: XCTestCase {
+    func p(_ s: String) -> ChannelName.Parsed { ChannelName.parse(s) }
+
+    func testCanalPlusSpellingsShareOneKey() {
+        let raws = ["FR| CANAL+ SPORT HD", "Canal Plus Sport FHD", "CANAL+SPORT", "FR: C+ Sport", "|FR| Canal + Sport ᴴᴰ",
+                    "[FR] CANAL+ SPORT (backup)", "FR - Canal+ Sport 4K", "canal+ sport"]
+        for r in raws { XCTAssertEqual(p(r).key, "canal plus sport", r) }
+        XCTAssertEqual(p("FR| CANAL+ SPORT HD").display, "Canal+ Sport")
+        XCTAssertEqual(ChannelName.searchKey("canal + sport"), "canal plus sport")
+        XCTAssertEqual(ChannelName.searchKey("canal plus"), "canal plus")
+    }
+
+    func testRelatedChannelsStayApart() {
+        let keys = Set(["Canal+", "Canal+ Sport", "Canal+ Sport 360", "beIN Sports 1", "beIN Sports 2", "France 3",
+                        "France 3 Alpes"].map { p($0).key })
+        XCTAssertEqual(keys.count, 7)
+        XCTAssertEqual(p("CANAL+SPORT 360").display, "Canal+ Sport 360")
+    }
+
+    func testQualityAndBackup() {
+        XCTAssertEqual(p("FR| TF1 FHD").quality, .fhd)
+        XCTAssertEqual(p("TF1ᴴᴰ").quality, .hd)
+        XCTAssertEqual(p("TF1ᴴᴰ").key, "tf1")
+        XCTAssertEqual(p("M6HD").key, "m6")
+        XCTAssertEqual(p("UK: Sky Sports F1 UHD").quality, .uhd)
+        XCTAssertEqual(p("TF1 4K HEVC").quality, .uhd)
+        XCTAssertTrue(p("FR: TF1 (backup)").backup)
+        XCTAssertEqual(p("FR: TF1 (backup)").key, "tf1")
+        XCTAssertEqual(p("FR| TF1 SD").quality, .sd)
+        XCTAssertEqual(p("TF1").quality, .unknown)
+    }
+
+    func testNumbersAndAliases() {
+        XCTAssertEqual(p("beIN Sports One").key, "bein sports 1")
+        XCTAssertEqual(p("BEIN SPORT 1 HD").key, "bein sports 1")
+        XCTAssertEqual(p("BEIN SPORT 1 HD").display, "beIN Sports 1")
+        XCTAssertEqual(p("TF 1").key, "tf1")
+        XCTAssertEqual(p("France 2").key, "france 2")
+        XCTAssertEqual(p("FRANCE 2 FHD").display, "France 2")
+        XCTAssertEqual(p("France Info").key, "franceinfo")
+        XCTAssertEqual(p("Rocky II").key, "rocky 2")
+        XCTAssertEqual(p("BFMTV").display, "BFM TV")
+        XCTAssertEqual(p("L'ÉQUIPE HD").display, "L'Équipe")
+        XCTAssertEqual(p("Arts & Culture").key, "arts et culture")
+    }
+
+    func testCountryPrefixIsStrippedButNotFrance2() {
+        XCTAssertEqual(p("FR| TF1").country, "FR")
+        XCTAssertEqual(p("VIP | UK | BBC ONE HD").display, "BBC One")
+        XCTAssertEqual(p("VIP | UK | BBC ONE HD").country, "GB")
+        XCTAssertEqual(p("France 2").display, "France 2")
+        XCTAssertNil(p("France 2").country)
+        XCTAssertEqual(p("⭐ FR ⭐ | M6").key, "m6")
+        XCTAssertEqual(p("Canal+ Sport-Live").key, "canal plus sport live")
+    }
+
+    func testDecorativeUnicodeAndCase() {
+        XCTAssertEqual(p("🔴 FR: CNEWS ᶠᴴᴰ").display, "CNews")
+        XCTAssertEqual(p("🔴 FR: CNEWS ᶠᴴᴰ").quality, .fhd)
+        XCTAssertEqual(p("ＴＦ１").key, "tf1")
+        XCTAssertEqual(p("FR| MON CHANNEL SPORT").display, "Mon Channel Sport")
+    }
+}
+
+final class ChannelGroupingTests: XCTestCase {
+    func e(_ id: String, _ name: String, group: String = "FR | Sport") -> IPTVEntry {
+        IPTVEntry(id: id, name: name, url: "http://x/\(id).ts", tvgId: nil, logo: nil, group: group, number: nil, kind: .live,
+                  playlist: "p", country: IPTVCountry.detect(group: group, name: name))
+    }
+
+    func testVariantsAreGroupedBestFirst() {
+        let r = ChannelGrouping.group([
+            e("1", "FR| CANAL+ SPORT HD"), e("2", "FR| CANAL+ SPORT 4K"), e("3", "FR| CANAL+ SPORT (backup)"),
+            e("4", "FR| CANAL+ SPORT SD"), e("5", "FR| CANAL+ SPORT 360 FHD"), e("6", "FR| CANAL+"),
+            e("7", "UK| Sky Sports F1 HD", group: "UK | Sport"), e("8", "UK: Sky Sports F1 FHD", group: "UK | Sport"),
+        ])
+        XCTAssertEqual(r.channels.map(\.name), ["Canal+ Sport", "Canal+ Sport 360", "Canal+", "Sky Sports F1"])
+        let v = r.variants[r.channels[0].id]!
+        XCTAssertEqual(v.map(\.id), ["2", "1", "4", "3"])
+        XCTAssertEqual(v.map(\.label), ["4K", "HD", "SD", "Secours"])
+        XCTAssertEqual(r.channels[0].url, "http://x/2.ts")
+        XCTAssertEqual(r.groupOf["3"], r.channels[0].id)
+        XCTAssertEqual(r.variants[r.channels[3].id]?.count, 2)
+    }
+
+    func testSameNameDifferentCountriesStayApart() {
+        let r = ChannelGrouping.group([e("1", "FR| Eurosport 1"), e("2", "DE: Eurosport 1", group: "DE | Sport")])
+        XCTAssertEqual(r.channels.count, 2)
+    }
+}
+
+final class ChannelSearchTests: XCTestCase {
+    func testNormalizedSearchRanksExactThenPrefix() {
+        let raws = ["FR| CANAL+ SPORT 360", "FR| CANAL+ SPORT", "FR| CANAL+", "FR| C8", "FR| Canal Plus Cinéma"]
+        let g = ChannelGrouping.group(raws.enumerated().map {
+            IPTVEntry(id: "\($0.offset)", name: $0.element, url: "u", tvgId: nil, logo: nil, group: "FR | TV", number: nil,
+                      kind: .live, playlist: "p", country: "FR")
+        })
+        let idx = IPTVSearchIndex(g.channels, channelNames: true)
+        XCTAssertEqual(idx.search("canal + sport").map(\.name).prefix(2), ["Canal+ Sport", "Canal+ Sport 360"])
+        XCTAssertEqual(idx.search("canal plus").first?.name, "Canal+")
+        XCTAssertEqual(idx.search("c+ sport").first?.name, "Canal+ Sport")
+        XCTAssertEqual(idx.search("canalplus cinema").first?.name, "Canal+ Cinéma")
+    }
+
+    func testFavoritesAndCountryRiseWithinATie() {
+        let list = [("a", "Eurosport 1", "DE"), ("b", "Eurosport 1", "FR")].map {
+            IPTVEntry(id: $0.0, name: $0.1, url: "u", tvgId: nil, logo: nil, group: "Sport", number: nil, kind: .live,
+                      playlist: "p", country: $0.2)
+        }
+        let idx = IPTVSearchIndex(list, channelNames: true)
+        XCTAssertEqual(idx.search("eurosport", country: "FR").first?.id, "b")
+        XCTAssertEqual(idx.search("eurosport", favorites: ["a"]).first?.id, "a")
+    }
+}

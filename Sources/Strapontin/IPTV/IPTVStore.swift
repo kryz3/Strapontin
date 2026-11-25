@@ -304,6 +304,21 @@ final class IPTVStore: ObservableObject {
         saveState()
     }
 
+    /// Fichier des noms seulement (type, groupe, nom), pour améliorer la reconnaissance des chaînes : aucune adresse,
+    /// aucun identifiant. Dans Téléchargements.
+    func exportNames() -> URL? {
+        func clean(_ s: String) -> String {
+            s.contains("://") ? "" : s.replacingOccurrences(of: "\t", with: " ").replacingOccurrences(of: "\n", with: " ")
+        }
+        var lines = ["type\tgroupe\tnom"]
+        for c in channels { lines.append("direct\t\(clean(c.group))\t\(clean(c.name))") }
+        for v in vod { lines.append("\(v.kind == .series ? "serie" : "film")\t\(clean(v.category))\t\(clean(v.name))") }
+        let dir = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
+        let url = dir.appendingPathComponent("Strapontin-noms-des-chaines.tsv")
+        guard (try? lines.joined(separator: "\n").write(to: url, atomically: true, encoding: .utf8)) != nil else { return nil }
+        return url
+    }
+
     func channel(_ id: String) -> IPTVEntry? { channels.first { $0.id == id } }
     var favoriteChannels: [IPTVEntry] { favorites.compactMap(channel) }
     var recentChannels: [IPTVEntry] { recents.compactMap(channel) }

@@ -503,6 +503,15 @@ struct IPTVSettings: View {
                         .foregroundStyle(.secondary)
                 }
                 if let e = store.error { Label(e, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange) }
+                if store.configured {
+                    HStack {
+                        Button("Exporter les noms des chaînes…") {
+                            if let url = store.exportNames() { NSWorkspace.shared.activateFileViewerSelecting([url]) }
+                        }
+                        Text("Noms, groupes et catégories seulement : aucune adresse ni identifiant.")
+                            .font(.system(size: 11)).foregroundStyle(.secondary)
+                    }
+                }
             } header: {
                 Text("Playlists")
             } footer: {
@@ -525,10 +534,51 @@ private struct PlaylistEditor: View {
     @State var playlist: IPTVPlaylist
     let save: (IPTVPlaylist) -> Void
     @Environment(\.dismiss) private var dismiss
+    @State private var xtream = false
+    @State private var server = ""
+    @State private var username = ""
+    @State private var password = ""
+
+    init(playlist: IPTVPlaylist, save: @escaping (IPTVPlaylist) -> Void) {
+        _playlist = State(initialValue: playlist)
+        self.save = save
+        // compte Xtream déjà enregistré : les trois champs plutôt que l'adresse complète
+        if let c = URLComponents(string: playlist.source), c.path.hasSuffix("get.php"),
+           let u = c.queryItems?.first(where: { $0.name == "username" })?.value,
+           let pw = c.queryItems?.first(where: { $0.name == "password" })?.value {
+            var base = c; base.path = String(c.path.dropLast("/get.php".count)); base.query = nil
+            _xtream = State(initialValue: true)
+            _server = State(initialValue: base.string ?? "")
+            _username = State(initialValue: u)
+            _password = State(initialValue: pw)
+        }
+    }
+
+    /// Adresse de playlist d'un compte Xtream (get.php), identifiants encodés.
+    private var xtreamSource: String? {
+        var s = server.trimmingCharacters(in: .whitespaces)
+        guard !s.isEmpty, !username.isEmpty, !password.isEmpty else { return nil }
+        if !s.contains("://") { s = "http://" + s }
+        while s.hasSuffix("/") { s.removeLast() }
+        guard var c = URLComponents(string: s + "/get.php") else { return nil }
+        c.queryItems = [.init(name: "username", value: username), .init(name: "password", value: password),
+                        .init(name: "type", value: "m3u_plus"), .init(name: "output", value: "ts")]
+        return c.url?.absoluteString
+    }
 
     var body: some View {
         Form {
             TextField("Nom", text: $playlist.name)
+            Picker("Type", selection: $xtream) {
+                Text("Adresse M3U ou fichier").tag(false)
+                Text("Compte Xtream").tag(true)
+            }
+            .pickerStyle(.segmented)
+            if xtream {
+                TextField("Serveur", text: $server, prompt: Text("http://serveur:port"))
+                TextField("Identifiant", text: $username)
+                SecureField("Mot de passe", text: $password)
+            } else {
             HStack {
                 TextField("Adresse M3U ou fichier", text: $playlist.source, prompt: Text("https://… ou ~/Documents/liste.m3u"))
                 Button("Fichier…") {
@@ -537,6 +587,7 @@ private struct PlaylistEditor: View {
                     if panel.runModal() == .OK, let u = panel.url { playlist.source = u.path }
                 }
             }
+            }
             TextField("Guide XMLTV (facultatif)", text: $playlist.guide, prompt: Text("Sinon celui annoncé par la playlist"))
             TextField("User-Agent (facultatif)", text: $playlist.userAgent)
             TextField("Referer (facultatif)", text: $playlist.referer)
@@ -544,8 +595,12 @@ private struct PlaylistEditor: View {
             HStack {
                 Spacer()
                 Button("Annuler") { dismiss() }
-                Button("Enregistrer") { save(playlist); dismiss() }
-                    .buttonStyle(.borderedProminent).disabled(playlist.source.trimmingCharacters(in: .whitespaces).isEmpty)
+                Button("Enregistrer") {
+                    if xtream, let src = xtreamSource { playlist.source = src }
+                    save(playlist); dismiss()
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(xtream ? xtreamSource == nil : playlist.source.trimmingCharacters(in: .whitespaces).isEmpty)
             }
         }
         .formStyle(.grouped)

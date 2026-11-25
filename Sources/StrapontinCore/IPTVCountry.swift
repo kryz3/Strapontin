@@ -118,6 +118,31 @@ public enum IPTVCountry {
         return nil
     }
 
+    /// Retire le pays écrit devant un nom de chaîne avec un séparateur (« FR| », « |FR| », « FR: », « [FR] », « FR - »,
+    /// « VIP | UK | ») : (pays, reste). Sans séparateur on ne touche à rien : « France 2 » reste « France 2 ».
+    public static func stripPrefix(_ text: String) -> (String?, String) {
+        var rest = Substring(text.trimmingCharacters(in: .whitespaces))
+        var found: String?
+        let separators: [Character] = ["|", ":", "]", ")", "▎", "┃", "│", "»", "-", "–"]
+        for _ in 0..<3 {
+            rest = rest.drop(while: { $0 == " " || "|[(▎┃│«".contains($0) })
+            // jusqu'au premier séparateur, s'il vient tôt
+            guard let i = rest.prefix(16).firstIndex(where: { separators.contains($0) }) else { break }
+            let token = rest[..<i].trimmingCharacters(in: .whitespaces)
+            // un tiret ne sépare que s'il est entouré d'espaces (« FR - TF1 », pas « Canal+ Sport-Live »)
+            if rest[i] == "-" || rest[i] == "–" {
+                let before = i > rest.startIndex ? rest[rest.index(before: i)] : " "
+                if before != " " { break }
+            }
+            let t = fold(token)
+            if let c = code(token: token, alone: true) { found = found ?? c }
+            else if !noise.contains(t) { break }
+            rest = rest[rest.index(after: i)...]
+        }
+        let out = rest.drop(while: { $0 == " " || "|]):-–▎┃│»".contains($0) })
+        return (found, out.isEmpty ? text : String(out))
+    }
+
     public static func detect(tvgCountry: String? = nil, group: String, name: String, tvgId: String? = nil) -> String? {
         if let tc = tvgCountry?.split(whereSeparator: { ",;| ".contains($0) }).first,
            let c = code(token: String(tc), alone: true) { return c }

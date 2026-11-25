@@ -187,19 +187,25 @@ public struct IPTVSearchIndex: Sendable {
     }
     private var rows: [Row] = []
     public private(set) var entries: [IPTVEntry] = []
+    /// Noms de chaînes : comparés par leur clé normalisée (« canal + sport » = « CANAL+SPORT »).
+    private var channelNames = false
 
-    public init(_ entries: [IPTVEntry]) {
+    public init(_ entries: [IPTVEntry], channelNames: Bool = false) {
         self.entries = entries
+        self.channelNames = channelNames
         rows = entries.enumerated().map { i, e in
-            let n = CatalogFold.fold(e.name)
+            let n = channelNames ? ChannelName.key(e.name) : CatalogFold.fold(e.name)
             return Row(index: i, name: n, tokens: n.split(separator: " ").map { Array($0.utf8) },
                        group: CatalogFold.fold(e.group), number: e.number)
         }
     }
 
     /// Les meilleures correspondances, au plus `limit`.
-    public func search(_ query: String, kinds: Set<IPTVKind>? = nil, limit: Int = 200) -> [IPTVEntry] {
-        let q = CatalogFold.fold(query)
+    /// À pertinence égale, les favoris (`favorites`, identifiants) et le pays choisi passent devant, sans jamais doubler
+    /// une correspondance plus exacte.
+    public func search(_ query: String, kinds: Set<IPTVKind>? = nil, limit: Int = 200, favorites: Set<String> = [],
+                       country: String? = nil) -> [IPTVEntry] {
+        let q = channelNames ? ChannelName.searchKey(query) : CatalogFold.fold(query)
         guard !q.isEmpty else { return [] }
         let words = q.split(separator: " ").map { Array($0.utf8) }
         let number = Int(q)
@@ -227,7 +233,11 @@ public struct IPTVSearchIndex: Sendable {
                 // la frappe tient dans le nom sans être un début de mot (« ance 5 »)
                 if r.name.contains(q) { score += 25 } else if score < 25 { continue }
             }
-            if score > 0 { scored.append((r.index, score - Double(r.name.count) / 200)) }   // à égalité, le nom le plus court
+            if score > 0 {
+                let e = entries[r.index]
+                let bonus = (favorites.contains(e.id) ? 3 : 0) + (country != nil && e.country == country ? 2 : 0)
+                scored.append((r.index, score + Double(bonus) - Double(r.name.count) / 200))
+            }   // à égalité, le nom le plus court
         }
         scored.sort { $0.1 != $1.1 ? $0.1 > $1.1 : $0.0 < $1.0 }
         return scored.prefix(limit).map { entries[$0.0] }
