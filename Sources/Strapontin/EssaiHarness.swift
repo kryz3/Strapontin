@@ -60,7 +60,7 @@ final class EssaiHarness: ObservableObject {
         switch verb {
         case "tab":
             let map: [String: TopTab] = ["home": .home, "movies": .movies, "shows": .shows, "discover": .discover,
-                                         "downloads": .downloads, "search": .search, "foryou": .forYou, "direct": .live, "catalogue": .iptvCatalog]
+                                         "downloads": .downloads, "search": .search, "foryou": .forYou, "direct": .live]
             if let t = map[arg] { send(.tab(t)) }
         case "open": send(.open(arg))
         case "back": send(.back)

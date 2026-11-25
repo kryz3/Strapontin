@@ -205,6 +205,7 @@ struct PosterCard: View {
                     .overlay { Sheen(active: hover) }
                     .overlay(alignment: .bottom) { ProgressStrip(item: item) }
                     .overlay { DownloadOverlay(mediaKey: item.id) }
+                    .overlay(alignment: .bottomTrailing) { StreamBadge(mediaKey: item.id).padding(.bottom, 4) }
                     .overlay(alignment: .topLeading) { badges }
                     .overlay(alignment: .topTrailing) {
                         if item.allWatched {

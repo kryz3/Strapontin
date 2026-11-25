@@ -140,6 +140,7 @@ struct SearchPage: View {
                     libraryResults
                     ChannelSearchSection(query: query)
                     TMDbSearchSections(query: query)
+                    IPTVTitleSearchSection(query: query)
                 }
             }
             .padding(.top, 172)   // sous le champ fixe (barre d'outils + champ + fondu)
@@ -433,6 +434,7 @@ struct TMDbPosterCard: View {
                     }
                 }
                 .overlay { DownloadOverlay(mediaKey: Media.key(result.kind, result.id)) }
+                .overlay(alignment: .bottomTrailing) { StreamBadge(mediaKey: Media.key(result.kind, result.id)) }
                 .overlay(alignment: .bottomLeading) {
                     if !owned, let n = versions {
                         Badge(text: n > 0 ? "\(n) VERSION\(n > 1 ? "S" : "")" : "INDISPONIBLE",
@@ -573,6 +575,8 @@ struct PreviewDetailView: View {
 
     @ViewBuilder
     private func primaryButtons(_ m: Media) -> some View {
+            // trois façons de regarder, selon ce qui est disponible : la bibliothèque, le streaming IPTV, le téléchargement
+            StreamButton(kind: kind, tmdbId: tmdbId, title: m.title)
             if let item = store.item(id: key) {
                 // arrivé dans la bibliothèque (la page bascule aussi d'elle-même sur la fiche complète)
                 PlayPill(title: "Lire") { play(item, resume: false) }

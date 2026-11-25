@@ -3,70 +3,94 @@ import SwiftUI
 
 // MARK: - En direct
 
-/// Onglet « En direct » : favoris et récentes en tête, puis les chaînes par groupe, recherche instantanée.
+/// Onglet « En direct », dans le langage des autres pages : une grande chaîne en tête avec son programme, puis des
+/// rangées (Favoris, Récentes, un rang par groupe) de cartes au format des vignettes, la barre des pays, la recherche.
 struct LiveTVView: View {
     @ObservedObject private var store = IPTVStore.shared
     @State private var query = ""
     @State private var results: [IPTVEntry] = []
-    @State private var group: String = LiveTVView.all
     static let all = "Toutes"
 
     /// Chaînes du pays choisi.
     private var inCountry: [IPTVEntry] { store.country == nil ? store.channels : store.channels.filter(store.inCountry) }
 
-    private var groups: [String] {
-        var seen = Set<String>(), out: [String] = []
-        for c in inCountry where seen.insert(c.group).inserted { out.append(c.group) }
-        return out
+    /// Rangées par groupe (« FR | Cinéma » et « FRANCE Cinéma » ensemble), dans l'ordre de la playlist.
+    private var groups: [(String, [IPTVEntry])] {
+        var order: [String] = [], rows: [String: [IPTVEntry]] = [:]
+        for c in inCountry {
+            let t = Self.groupTitle(c.group)
+            if rows[t] == nil { order.append(t) }
+            rows[t, default: []].append(c)
+        }
+        return order.map { ($0, rows[$0]!) }
     }
 
-    private var shown: [IPTVEntry] {
-        group == Self.all ? inCountry : inCountry.filter { $0.group == group }
-    }
-
-    private var allTitle: String {
-        store.country.map { "Toutes les chaînes · \(IPTVCountry.label($0))" } ?? "Toutes les chaînes"
+    /// La chaîne en tête : celle qu'on regarde, sinon le premier favori, sinon la dernière regardée.
+    private var featured: IPTVEntry? {
+        if let c = PlayerController.current, c.isLive, let e = c.queue.first?.live?.entry { return e }
+        return store.favoriteChannels.first ?? store.recentChannels.first ?? inCountry.first
     }
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 30) {
-                header
+            VStack(alignment: .leading, spacing: 36) {
                 if !store.configured {
+                    header.padding(.top, 96)
                     IPTVSetupNotice()
                 } else if !query.isEmpty {
+                    header.padding(.top, 96)
                     if !store.channelCountries.isEmpty { CountryBar(counts: store.channelCountries, total: store.channels.count) }
                     let found = results.filter(store.inCountry)
                     channelGrid(found, title: found.isEmpty ? "Aucune chaîne pour « \(query) »"
                                 + (store.country.map { " en \(IPTVCountry.label($0))" } ?? "") : "Chaînes")
                 } else {
+                    if let f = featured { LiveHero(channel: f) } else { header.padding(.top, 96) }
+                    HStack {
+                        if !store.channelCountries.isEmpty {
+                            CountryBar(counts: store.channelCountries, total: store.channels.count)
+                        }
+                        Spacer(minLength: 0)
+                        IPTVSearchField(text: $query, prompt: "Chaîne, numéro, groupe…").padding(.trailing, Theme.margin)
+                    }
                     if !store.favoriteChannels.isEmpty { channelRow("Favoris", store.favoriteChannels, reorder: true) }
                     if !store.recentChannels.isEmpty { channelRow("Récentes", Array(store.recentChannels.prefix(15))) }
-                    if !store.channelCountries.isEmpty { CountryBar(counts: store.channelCountries, total: store.channels.count) }
-                    groupPicker
                     if store.channels.isEmpty && store.loading {
                         SkeletonShelf(title: "Chaînes")
                     } else {
-                        channelGrid(shown, title: group == Self.all ? allTitle : group)
+                        LazyVStack(alignment: .leading, spacing: 36) {
+                            ForEach(groups, id: \.0) { g, list in
+                                Shelf(title: g) {
+                                    ForEach(list.prefix(30)) { ChannelCard(channel: $0, width: 240) }
+                                    if list.count > 30 {
+                                        NavigationLink(value: "livegroup:" + g) { MoreCard(count: list.count) }.buttonStyle(.plain)
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
-            .padding(.top, 96).padding(.bottom, 40)
+            .padding(.bottom, 40)
         }
         .ignoresSafeArea(edges: .top)
         .background(Theme.backdrop)
-        .onChange(of: store.country) { _, _ in group = Self.all }
         .onReceive(NotificationCenter.default.publisher(for: .essaiLiveQuery)) { query = ($0.object as? String) ?? "" }
         .task(id: query) {
             // la frappe ne fige jamais l'interface : recherche hors du fil principal, annulée à chaque lettre
             let q = query, index = store.channelIndex
+            let favs = Set(store.favorites), country = store.country
             guard !q.isEmpty else { results = []; return }
             let t0 = ContinuousClock.now
-            let found = await Task.detached(priority: .userInitiated) { index.search(q, kinds: [.live], limit: 300) }.value
+            let found = await Task.detached(priority: .userInitiated) {
+                index.search(q, kinds: [.live], limit: 300, favorites: favs, country: country)
+            }.value
             Perf.log("recherche chaînes \(q.count) lettres, \(found.count) trouvées", since: t0)
             if !Task.isCancelled { results = found }
         }
     }
+
+    /// « FR | Sport » → « Sport » : le pays est déjà dans la barre.
+    static func groupTitle(_ g: String) -> String { IPTVCountry.groupTitle(g) }
 
     private var header: some View {
         HStack(alignment: .firstTextBaseline, spacing: 20) {
@@ -80,27 +104,10 @@ struct LiveTVView: View {
         .padding(.horizontal, Theme.margin)
     }
 
-    private var groupPicker: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach([Self.all] + groups, id: \.self) { g in
-                    Button { withAnimation(.easeOut(duration: 0.15)) { group = g } } label: {
-                        Text(g).font(.system(size: 13, weight: group == g ? .semibold : .medium)).lineLimit(1)
-                            .padding(.horizontal, 14).padding(.vertical, 7)
-                            .background(group == g ? Color.white.opacity(0.92) : Color.white.opacity(0.08), in: Capsule())
-                            .foregroundStyle(group == g ? Color.black : Color.white)
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(.horizontal, Theme.margin)
-        }
-    }
-
     private func channelRow(_ title: String, _ list: [IPTVEntry], reorder: Bool = false) -> some View {
         Shelf(title: title) {
             ForEach(Array(list.enumerated()), id: \.element.id) { i, c in
-                ChannelCard(channel: c)
+                ChannelCard(channel: c, width: 240)
                     .contextMenu {
                         if reorder {
                             Button("Déplacer à gauche") { store.moveFavorite(from: IndexSet(integer: i), to: max(0, i - 1)) }.disabled(i == 0)
@@ -115,7 +122,7 @@ struct LiveTVView: View {
     private func channelGrid(_ list: [IPTVEntry], title: String) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             Text(title).font(.system(size: 21, weight: .bold))
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 200, maximum: 240), spacing: 22)], alignment: .leading, spacing: 24) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 220, maximum: 260), spacing: 22)], alignment: .leading, spacing: 26) {
                 ForEach(list) { ChannelCard(channel: $0) }
             }
         }
@@ -123,51 +130,181 @@ struct LiveTVView: View {
     }
 }
 
+/// Toutes les chaînes d'un groupe (« Tout voir » au bout d'une rangée).
+struct LiveGroupPage: View {
+    let group: String
+    @ObservedObject private var store = IPTVStore.shared
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                Text(group).font(.system(size: 30, weight: .bold))
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 220, maximum: 260), spacing: 22)], alignment: .leading, spacing: 26) {
+                    ForEach(store.channels.filter { LiveTVView.groupTitle($0.group) == group && store.inCountry($0) }) { ChannelCard(channel: $0) }
+                }
+            }
+            .padding(.horizontal, Theme.margin).padding(.top, 96).padding(.bottom, 40)
+        }
+        .ignoresSafeArea(edges: .top)
+        .background(Theme.background)
+    }
+}
+
+/// Carte « Tout voir » au bout d'une rangée, au format des cartes de chaîne.
+private struct MoreCard: View {
+    let count: Int
+    @State private var hover = false
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ZStack {
+                RoundedRectangle(cornerRadius: Theme.corner, style: .continuous).fill(.white.opacity(hover ? 0.12 : 0.07))
+                VStack(spacing: 6) {
+                    Image(systemName: "square.grid.2x2").font(.system(size: 22, weight: .semibold))
+                    Text("Tout voir").font(.system(size: 14, weight: .semibold))
+                    Text("\(count) chaînes").font(.system(size: 11)).foregroundStyle(.secondary)
+                }
+            }
+            .aspectRatio(16 / 9, contentMode: .fit)
+            .scaleEffect(hover ? 1.04 : 1)
+        }
+        .frame(width: 240)
+        .onHover { h in withAnimation(.easeOut(duration: 0.18)) { hover = h } }
+    }
+}
+
+/// En tête d'« En direct » : la chaîne, ce qui passe et ensuite, comme le grand visuel des autres pages.
+struct LiveHero: View {
+    let channel: IPTVEntry
+    @ObservedObject private var store = IPTVStore.shared
+
+    var body: some View {
+        let nn = store.guide.nowNext(channel.tvgId)
+        ZStack(alignment: .bottomLeading) {
+            // le logo en grand, flouté, comme fond ; puis le même dégradé que les fiches
+            ChannelLogo(logo: channel.logo, name: "", fontSize: 1)
+                .frame(maxWidth: .infinity, maxHeight: .infinity).scaleEffect(1.6).blur(radius: 60).opacity(0.55)
+            LinearGradient(colors: [Color(white: 0.16), Theme.background], startPoint: .top, endPoint: .bottom).opacity(0.75)
+            HeroShade()
+            HStack(alignment: .bottom, spacing: 36) {
+                VStack(alignment: .leading, spacing: 14) {
+                    HStack(spacing: 10) {
+                        Text("EN DIRECT").font(.system(size: 11, weight: .heavy)).padding(.horizontal, 7).padding(.vertical, 3)
+                            .background(Theme.accent, in: RoundedRectangle(cornerRadius: 4)).foregroundStyle(.white)
+                        if let n = channel.number { Text("\(n)").font(.system(size: 13, weight: .bold).monospacedDigit()).foregroundStyle(.white.opacity(0.7)) }
+                        Text(LiveTVView.groupTitle(channel.group).uppercased()).font(.system(size: 11, weight: .heavy)).kerning(0.8)
+                            .foregroundStyle(.white.opacity(0.6))
+                    }
+                    Text(channel.name).font(.system(size: 46, weight: .bold)).foregroundStyle(.white).lineLimit(1)
+                    if let now = nn.now {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(now.title).font(.system(size: 17, weight: .semibold)).foregroundStyle(.white.opacity(0.9))
+                            ProgressView(value: min(1, max(0, Date().timeIntervalSince(now.start) / now.stop.timeIntervalSince(now.start))))
+                                .tint(Theme.accent).frame(maxWidth: 360)
+                            if let next = nn.next {
+                                Text("Ensuite : \(next.title) · \(next.start.formatted(date: .omitted, time: .shortened))")
+                                    .font(.system(size: 13)).foregroundStyle(.white.opacity(0.7))
+                            }
+                        }
+                    }
+                    HStack(spacing: 12) {
+                        PlayPill(title: "Regarder") { PlayerController.playLive(channel) }
+                        Button { store.toggleFavorite(channel) } label: {
+                            Image(systemName: store.isFavorite(channel) ? "star.fill" : "star").font(.system(size: 15, weight: .bold))
+                                .foregroundStyle(store.isFavorite(channel) ? Color.yellow : Color.white)
+                        }
+                        .buttonStyle(CircleButtonStyle())
+                        .help(store.isFavorite(channel) ? "Retirer des favoris" : "Ajouter aux favoris")
+                    }
+                    .padding(.top, 6)
+                }
+                Spacer()
+                ChannelLogo(logo: channel.logo, name: channel.name, collapsedSize: CGSize(width: 300, height: 170))
+                    .padding(.bottom, 10)
+            }
+            .padding(.horizontal, Theme.margin)
+            .padding(.bottom, 40)
+        }
+        .frame(height: 400)
+        .clipped()
+    }
+}
+
 /// Une chaîne : logo, numéro, nom, programme en cours ; étoile des favoris ; un clic la lance.
 struct ChannelCard: View {
     let channel: IPTVEntry
+    /// Largeur fixe dans les rangées ; libre dans les grilles.
+    var width: CGFloat? = nil
     @ObservedObject private var store = IPTVStore.shared
     @State private var hover = false
 
     var body: some View {
         let nn = store.guide.nowNext(channel.tvgId)
+        let variants = store.variants(of: channel)
         Button { PlayerController.playLive(channel) } label: {
-            VStack(alignment: .leading, spacing: 8) {
-                ZStack(alignment: .topLeading) {
-                    LinearGradient(colors: [Color(white: 0.2), Color(white: 0.12)], startPoint: .top, endPoint: .bottom)
-                    ChannelLogo(logo: channel.logo, name: channel.name, fontSize: 17).padding(22)
-                    HStack {
+            VStack(alignment: .leading, spacing: 9) {
+                ZStack(alignment: .bottomLeading) {
+                    LinearGradient(colors: [Color(white: 0.21), Color(white: 0.12)], startPoint: .top, endPoint: .bottom)
+                    ChannelLogo(logo: channel.logo, name: channel.name, fontSize: 18)
+                        .padding(.horizontal, 30).padding(.vertical, 24)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    LinearGradient(colors: [.clear, .black.opacity(0.55)], startPoint: .center, endPoint: .bottom)
+                    HStack(alignment: .bottom) {
                         if let n = channel.number {
                             Text("\(n)").font(.system(size: 11, weight: .bold).monospacedDigit())
                                 .padding(.horizontal, 6).padding(.vertical, 2).background(.black.opacity(0.5), in: Capsule())
                         }
                         Spacer()
-                        if store.isFavorite(channel) { Image(systemName: "star.fill").font(.system(size: 11)).foregroundStyle(.yellow) }
+                        // même bouton que les vignettes « À suivre »
+                        Image(systemName: "play.fill")
+                            .font(.system(size: 13, weight: .bold)).foregroundStyle(.black)
+                            .frame(width: 32, height: 32).background(.white, in: Circle())
+                            .opacity(hover ? 1 : 0).scaleEffect(hover ? 1 : 0.6)
                     }
-                    .padding(8)
-                }
-                .aspectRatio(16 / 9, contentMode: .fit)
-                .clipShape(RoundedRectangle(cornerRadius: Theme.corner, style: .continuous))
-                .overlay(alignment: .bottom) {
+                    .padding(10)
                     if let now = nn.now {
                         GeometryReader { g in
-                            Capsule().fill(Theme.accent)
-                                .frame(width: g.size.width * min(1, max(0, Date().timeIntervalSince(now.start) / now.stop.timeIntervalSince(now.start))), height: 3)
+                            VStack {
+                                Spacer()
+                                ZStack(alignment: .leading) {
+                                    Capsule().fill(.white.opacity(0.3))
+                                    Capsule().fill(Theme.accent)
+                                        .frame(width: g.size.width * min(1, max(0, Date().timeIntervalSince(now.start) / now.stop.timeIntervalSince(now.start))))
+                                }
+                                .frame(height: 3)
+                            }
                         }
-                        .frame(height: 3).padding(.horizontal, 8).padding(.bottom, 6)
+                        .padding(.horizontal, 12).padding(.bottom, 4)
                     }
                 }
+                .aspectRatio(16 / 9, contentMode: .fit)
+                .overlay { Sheen(active: hover) }
+                .overlay(alignment: .topTrailing) {
+                    if store.isFavorite(channel) {
+                        Image(systemName: "star.fill").font(.system(size: 11)).foregroundStyle(.yellow).padding(9)
+                    }
+                }
+                .clipShape(RoundedRectangle(cornerRadius: Theme.corner, style: .continuous))
                 .scaleEffect(hover ? 1.04 : 1)
-                .shadow(color: .black.opacity(hover ? 0.45 : 0.2), radius: hover ? 14 : 5, y: 4)
+                .shadow(color: .black.opacity(hover ? 0.5 : 0.2), radius: hover ? 16 : 6, y: hover ? 10 : 3)
                 Text(channel.name).font(.system(size: 13, weight: .semibold)).lineLimit(1)
-                Text(nn.now?.title ?? channel.group).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
+                Text(nn.now?.title ?? LiveTVView.groupTitle(channel.group)).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1)
             }
-            .frame(minWidth: 200, maxWidth: 240)
+            .frame(width: width)
+            .frame(minWidth: width == nil ? 200 : nil, maxWidth: width == nil ? 260 : nil)
         }
         .buttonStyle(.plain)
-        .onHover { h in withAnimation(.easeOut(duration: 0.15)) { hover = h } }
+        .onHover { h in withAnimation(.easeOut(duration: 0.18)) { hover = h } }
+        // les noms bruts de la playlist, au survol prolongé
+        .help(variants.map { "\($0.label) — \($0.rawName)" }.joined(separator: "\n"))
         .contextMenu {
             Button(store.isFavorite(channel) ? "Retirer des favoris" : "Ajouter aux favoris") { store.toggleFavorite(channel) }
+            if variants.count > 1 {
+                Menu("Qualité par défaut") {
+                    ForEach(variants) { v in
+                        Button((store.preferredVariant(channel)?.id == v.id ? "✓ " : "") + v.label) { store.chooseQuality(v.id, for: channel) }
+                    }
+                }
+            }
         }
     }
 }
@@ -206,101 +343,6 @@ struct IPTVSetupNotice: View {
 }
 
 // MARK: - Catalogue IPTV
-
-/// Onglet « Catalogue IPTV » : les films et séries à la demande des playlists, avec les fiches TMDb quand le titre est reconnu.
-struct IPTVCatalogView: View {
-    @ObservedObject private var store = IPTVStore.shared
-    @State private var kind: IPTVKind = .movie
-    @State private var category = LiveTVView.all
-    @State private var query = ""
-    @State private var results: [VODItem] = []
-
-    /// Le pays choisi ne filtre le catalogue que s'il y figure (sinon tout le catalogue).
-    private var countryApplies: Bool { store.country.map { c in store.vodCountries.contains { $0.code == c } } ?? false }
-    private var items: [VODItem] {
-        let apply = countryApplies
-        return store.catalogItems.filter { $0.kind == kind && (!apply || store.inCountry($0)) }
-    }
-    private var categories: [String] {
-        var seen = Set<String>(), out: [String] = []
-        for v in items where seen.insert(v.category).inserted { out.append(v.category) }
-        return out
-    }
-    private var shown: [VODItem] { category == LiveTVView.all ? items : items.filter { $0.category == category } }
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 26) {
-                HStack(alignment: .firstTextBaseline, spacing: 20) {
-                    Text("Catalogue IPTV").font(.system(size: 30, weight: .bold))
-                    if store.loading { ProgressView().controlSize(.small) }
-                    Spacer()
-                    if store.configured { IPTVSearchField(text: $query, prompt: "Film, série…") }
-                }
-                .padding(.horizontal, Theme.margin)
-                if !store.configured {
-                    IPTVSetupNotice()
-                } else {
-                    Picker("", selection: $kind) {
-                        Text("Films").tag(IPTVKind.movie)
-                        Text("Séries").tag(IPTVKind.series)
-                    }
-                    .pickerStyle(.segmented).labelsHidden().frame(width: 240).padding(.horizontal, Theme.margin)
-                    if !store.vodCountries.isEmpty {
-                        CountryBar(counts: store.vodCountries, total: store.vod.count, applies: countryApplies)
-                    }
-                    if query.isEmpty {
-                        categoryPicker
-                        grid(shown)
-                    } else {
-                        grid(countryApplies ? results.filter(store.inCountry) : results)
-                    }
-                    if items.isEmpty && !store.loading {
-                        Text(kind == .movie ? "Pas de films dans tes playlists." : "Pas de séries dans tes playlists.")
-                            .foregroundStyle(.secondary).padding(.horizontal, Theme.margin)
-                    }
-                }
-            }
-            .padding(.top, 96).padding(.bottom, 40)
-        }
-        .ignoresSafeArea(edges: .top)
-        .background(Theme.backdrop)
-        .onChange(of: kind) { _, _ in category = LiveTVView.all }
-        .onChange(of: store.country) { _, _ in category = LiveTVView.all }
-        .task(id: "\(query)|\(kind.rawValue)") {
-            let q = query, index = store.vodIndex, k = kind
-            guard !q.isEmpty else { results = []; return }
-            let ids = await Task.detached(priority: .userInitiated) { index.search(q, kinds: [k], limit: 300).map(\.id) }.value
-            guard !Task.isCancelled else { return }
-            let byId = Dictionary(store.vod.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
-            results = ids.compactMap { byId[$0] }
-        }
-    }
-
-    private var categoryPicker: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach([LiveTVView.all] + categories, id: \.self) { c in
-                    Button { category = c } label: {
-                        Text(c).font(.system(size: 13, weight: category == c ? .semibold : .medium)).lineLimit(1)
-                            .padding(.horizontal, 14).padding(.vertical, 7)
-                            .background(category == c ? Color.white.opacity(0.92) : Color.white.opacity(0.08), in: Capsule())
-                            .foregroundStyle(category == c ? Color.black : Color.white)
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(.horizontal, Theme.margin)
-        }
-    }
-
-    private func grid(_ list: [VODItem]) -> some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 160, maximum: 180), spacing: 24)], alignment: .leading, spacing: 30) {
-            ForEach(list) { VODCard(item: $0) }
-        }
-        .padding(.horizontal, Theme.margin)
-    }
-}
 
 /// Fiches TMDb des titres du catalogue IPTV : cherchées à l'affichage, gardées en mémoire.
 @MainActor

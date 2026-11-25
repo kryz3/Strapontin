@@ -40,7 +40,7 @@ public enum ChannelName {
     private static let backupWords: Set<String> = ["BACKUP", "BKP", "SECOURS", "BACK UP", "ALT", "BK"]
     private static let technicalWords: Set<String> = [
         "HEVC", "H265", "H.265", "H264", "H.264", "X265", "X264", "50FPS", "60FPS", "25FPS", "30FPS", "FPS", "RAW",
-        "VIP", "MULTI", "MULTIAUDIO", "PPV", "LIVE", "DIRECT", "NEW", "TEST", "PLUS+", "★", "VO", "VF", "VOSTFR",
+        "VIP", "MULTI", "MULTIAUDIO", "PPV", "★", "VO", "VF", "VOSTFR",
         "HDR", "SDR", "DOLBY", "ATMOS", "AAC", "AC3", "MUX",
     ]
 
@@ -110,9 +110,27 @@ public enum ChannelName {
         var found: Quality?
         var backup = false
         var kept: [String] = []
-        // mots, en gardant + et & collés à leur mot ; les crochets et parenthèses deviennent des espaces
-        let cleaned = text.map { "[](){}|".contains($0) ? " " : $0 }
-        for var w in String(cleaned).split(separator: " ").map(String.init) {
+        // crochets et parenthèses : ôtés s'ils ne contiennent que des mentions techniques (« (backup) », « [HD] »),
+        // gardés sinon (« Chaîne de test (secours) »)
+        var cleaned = ""
+        var i = text.startIndex
+        while i < text.endIndex {
+            let ch = text[i]
+            if "([{".contains(ch), let close = text[i...].firstIndex(where: { ")]}".contains($0) }) {
+                let inner = text[text.index(after: i)..<close]
+                let words = inner.split(whereSeparator: { " -_.".contains($0) }).map { $0.uppercased() }
+                if !words.isEmpty, words.allSatisfy({ qualityWords[$0] != nil || backupWords.contains($0) || technicalWords.contains($0) }) {
+                    cleaned += " " + inner + " "          // les mots passent par le tri ci-dessous (qualité, secours)
+                } else {
+                    cleaned += text[i...close]
+                }
+                i = text.index(after: close)
+                continue
+            }
+            cleaned.append(ch == "|" ? " " : ch)
+            i = text.index(after: i)
+        }
+        for var w in cleaned.split(separator: " ").map(String.init) {
             w = w.trimmingCharacters(in: CharacterSet(charactersIn: "-_.:,;"))
             if w.isEmpty { continue }
             let u = w.uppercased()

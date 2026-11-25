@@ -207,6 +207,14 @@ final class IPTVCountryTests: XCTestCase {
         XCTAssertEqual(d("VIP |FR| Sport"), "FR")
     }
 
+    func testGroupTitles() {
+        for g in ["FR | Cinéma", "|FR| Cinéma", "FRANCE Cinéma", "FR: Cinéma", "VIP FRANCE | Cinéma"] {
+            XCTAssertEqual(IPTVCountry.groupTitle(g), "Cinéma", g)
+        }
+        XCTAssertEqual(IPTVCountry.groupTitle("Sport"), "Sport")
+        XCTAssertEqual(IPTVCountry.groupTitle("France 2 Régions"), "France 2 Régions")
+    }
+
     func testRegions() {
         XCTAssertEqual(d("AR | MBC"), "ARAB")
         XCTAssertEqual(d("EX-YU | Sport"), "EXYU")
@@ -316,6 +324,11 @@ final class ChannelNameTests: XCTestCase {
         XCTAssertEqual(p("🔴 FR: CNEWS ᶠᴴᴰ").quality, .fhd)
         XCTAssertEqual(p("ＴＦ１").key, "tf1")
         XCTAssertEqual(p("FR| MON CHANNEL SPORT").display, "Mon Channel Sport")
+        XCTAssertEqual(p("Chaîne de test (seule)").display, "Chaîne de test (seule)")
+        XCTAssertEqual(p("Chaîne de test (seule)").key, "chaine de test seule")
+        XCTAssertEqual(p("FR: TF1 [FHD]").display, "TF1")
+        XCTAssertEqual(p("FR: TF1 [FHD]").quality, .fhd)
+        XCTAssertEqual(p("France 24 Live").display, "France 24 Live")
     }
 }
 
@@ -368,5 +381,39 @@ final class ChannelSearchTests: XCTestCase {
         let idx = IPTVSearchIndex(list, channelNames: true)
         XCTAssertEqual(idx.search("eurosport", country: "FR").first?.id, "b")
         XCTAssertEqual(idx.search("eurosport", favorites: ["a"]).first?.id, "a")
+    }
+}
+
+final class VODMatchTests: XCTestCase {
+    func r(_ id: Int, _ title: String, _ year: Int?) -> TMDbSearchResult {
+        TMDbSearchResult(id: id, kind: .movie, title: title, year: year, overview: "", posterPath: nil)
+    }
+
+    func testSameFilmUnderProviderSpellingsHasOneKey() {
+        let k = Set(["FR | Dune (2021) [MULTI]", "|FR| DUNE 4K (2021)", "VF - Dune - 2021", "Dune (2021) FHD"].map {
+            VODMatch.key(kind: .movie, title: $0, year: VODTitle.year($0))
+        })
+        XCTAssertEqual(k.count, 1)
+        XCTAssertNotEqual(VODMatch.key(kind: .movie, title: "Dune", year: 1984), VODMatch.key(kind: .movie, title: "Dune", year: 2021))
+    }
+
+    func testPicksTheRightYearAndTitle() {
+        let res = [r(1, "Dune", 1984), r(2, "Dune", 2021), r(3, "Dune : Deuxième partie", 2024)]
+        XCTAssertEqual(VODMatch.best(res, title: "FR | Dune (2021)", year: 2021)?.id, 2)
+        XCTAssertEqual(VODMatch.best(res, title: "Dune", year: 1984)?.id, 1)
+        XCTAssertEqual(VODMatch.best([r(9, "Rocky II", 1979)], title: "Rocky 2", year: 1979)?.id, 9)
+        XCTAssertEqual(VODMatch.best([r(4, "Le Parrain", 1972)], title: "Le Parrain", year: nil)?.id, 4)
+        XCTAssertEqual(VODMatch.best([r(5, "Fast & Furious", 2009)], title: "Fast and Furious", year: 2009)?.id, nil)
+        XCTAssertEqual(VODMatch.best([r(5, "Fast & Furious", 2009)], title: "Fast et Furious", year: 2009)?.id, 5)
+    }
+
+    func testRefusesWhenUnsure() {
+        XCTAssertNil(VODMatch.best([r(1, "Dune", 1984)], title: "Dune", year: 2021))           // mauvaise année
+        XCTAssertNil(VODMatch.best([r(1, "Avatar", 2009)], title: "Avatar Legends", year: nil))   // titre seulement voisin
+        XCTAssertNil(VODMatch.best([r(1, "Mon voisin Totoro", 1988)], title: "Totoro", year: 1988))
+        XCTAssertEqual(VODMatch.best([r(1, "Avatar", 2009)], title: "Avatar Extended", year: 2009)?.id, 1)
+        XCTAssertEqual(VODMatch.best([r(7, "Dune", 2021)], title: "Dune", year: 2021, originalTitles: [:])?.id, 7)
+        XCTAssertEqual(VODMatch.best([r(8, "La Cité de la peur", 1994)], title: "The City of Fear", year: 1994,
+                                     originalTitles: [8: "The City of Fear"])?.id, 8)
     }
 }

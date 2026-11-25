@@ -5,22 +5,26 @@ import SwiftUI
 /// « marquer comme non vu ». Construit à partir de la date de dernière lecture de chaque fichier.
 struct HistoryView: View {
     @EnvironmentObject var store: LibraryStore
+    @ObservedObject private var iptv = IPTVStore.shared
 
+    /// Une lecture : un fichier de la bibliothèque, ou un film / épisode regardé en streaming (IPTV).
     private struct Entry: Identifiable {
-        var id: String { file.path }
-        var file: MediaFile
-        var item: LibraryItem
+        var id: String { stream?.key ?? file!.path }
+        var file: MediaFile?
+        var item: LibraryItem?
+        var stream: StreamRecord?
         var date: Date
     }
 
     private var entries: [Entry] {
         var byPath: [String: LibraryItem] = [:]
         for i in store.items { for f in i.files { byPath[f.path] = i } }
-        return store.files.compactMap { f -> Entry? in
+        let files = store.files.compactMap { f -> Entry? in
             guard let t = f.lastPlayed, t > 0, let item = byPath[f.path] else { return nil }
             return Entry(file: f, item: item, date: Date(timeIntervalSince1970: t))
         }
-        .sorted { $0.date > $1.date }
+        let streams = iptv.streams.map { Entry(stream: $0, date: $0.date) }
+        return (files + streams).sorted { $0.date > $1.date }
     }
 
     private var groups: [(String, [Entry])] {
@@ -63,8 +67,51 @@ struct HistoryView: View {
         .background(Theme.backdrop)
     }
 
-    private func row(_ e: Entry) -> some View {
-        let f = e.file
+    @ViewBuilder private func row(_ e: Entry) -> some View {
+        if let r = e.stream { streamRow(r) } else if let f = e.file, let item = e.item { fileRow(f, item, e.date) }
+    }
+
+    private func streamRow(_ r: StreamRecord) -> some View {
+        let p = iptv.progress[r.key]
+        let media = r.mediaKey.flatMap { store.media[$0] }
+        let done = p.map { $0[1] > 0 && $0[0] >= $0[1] * 0.95 } ?? false
+        return HStack(spacing: 16) {
+            ZStack(alignment: .bottomLeading) {
+                Color(white: 0.16)
+                if let m = media { LocalImage(url: store.backdropURL(m)) }
+                Image(systemName: "play.tv").font(.system(size: 22)).foregroundStyle(.white.opacity(media == nil ? 0.5 : 0))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                if let p, p[1] > 0, p[0] > 0, !done {
+                    Capsule().fill(.white.opacity(0.25)).frame(height: 3)
+                        .overlay(alignment: .leading) {
+                            GeometryReader { g in Capsule().fill(Theme.accent).frame(width: g.size.width * min(1, p[0] / p[1])) }
+                        }
+                        .padding(6)
+                }
+            }
+            .frame(width: 160, height: 90)
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            VStack(alignment: .leading, spacing: 4) {
+                Text(r.title).font(.system(size: 15, weight: .semibold)).lineLimit(1)
+                Text(["En streaming", r.subtitle].compactMap { $0 }.joined(separator: " · "))
+                    .font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1)
+                Text((done ? "Vu · " : p.map { "Arrêté à \(formatTime($0[0])) · " } ?? "") + r.date.formatted(date: .omitted, time: .shortened))
+                    .font(.system(size: 11)).foregroundStyle(.secondary)
+            }
+            Spacer()
+            if let k = r.mediaKey {
+                NavigationLink(value: k) {
+                    SmallPill(title: done ? "Revoir" : "Reprendre", icon: done ? "arrow.counterclockwise" : "play.fill", filled: !done)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(8)
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(.white.opacity(0.04)))
+    }
+
+    private func fileRow(_ f: MediaFile, _ item: LibraryItem, _ date: Date) -> some View {
+        let e = (file: f, item: item, date: date)
         let episode = f.season.flatMap { s in f.episode.map { String(format: "S%d, É%d", s, $0) } }
         return HStack(spacing: 16) {
             ZStack(alignment: .bottomLeading) {

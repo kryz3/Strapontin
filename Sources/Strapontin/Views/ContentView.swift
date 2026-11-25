@@ -7,7 +7,7 @@ enum TopTab: String, Hashable, CaseIterable, Identifiable {
     // ni Bibliothèque (doublon de Films + Séries : ses filtres et tris sont dans « Tous les films » / « Toutes les
     // séries ») ; les téléchargements sont sur les affiches, et dans leur onglet tant qu'il y en a en cours
     case search = "Recherche", home = "Accueil", movies = "Films", shows = "Séries", forYou = "Pour toi", discover = "Découvrir"
-    case live = "En direct", iptvCatalog = "Catalogue IPTV"
+    case live = "En direct"
     case downloads = "En téléchargement"
     var id: String { rawValue }
 }
@@ -121,7 +121,6 @@ struct ContentView: View {
         case .shows: CategoryPage(kind: .tv)
         case .forYou: ForYouView()
         case .live: LiveTVView()
-        case .iptvCatalog: IPTVCatalogView()
         case .discover: DiscoverView()
         case .downloads: GridPage(title: "En téléchargement", items: [],
                                   downloads: downloads.visibleEntries(store: store).filter { !$0.isDone })
@@ -143,6 +142,8 @@ struct ContentView: View {
             DownloadDetailView(entryId: id)
         } else if id == "tracker" {
             TrackerView()
+        } else if id.hasPrefix("livegroup:") {
+            LiveGroupPage(group: String(id.dropFirst(10)))
         } else if id.hasPrefix("vod:") {
             VODDetailView(itemId: String(id.dropFirst(4)))
         } else if id == "history" {
@@ -171,7 +172,7 @@ private struct TopBar: View {
             ForEach([TopTab.home, .movies, .shows, .forYou, .discover]) { item($0) }
             // IPTV : seulement quand une playlist est configurée
             if iptv.configured {
-                ForEach([TopTab.live, .iptvCatalog]) { item($0) }
+                item(.live)
             }
             if downloading > 0 { item(.downloads, count: downloading) }
             SettingsLink {
@@ -329,16 +330,23 @@ struct StatusPill: View {
 struct CategoryPage: View {
     let kind: MediaKind
     @EnvironmentObject var store: LibraryStore
+    @ObservedObject private var iptv = IPTVStore.shared
+    @ObservedObject private var catalog = IPTVCatalog.shared
 
     var body: some View {
         let items = store.items.filter { $0.kind == kind }
         let genres = GenreRow.rows(items)
+        let streamShelves = catalog.shelves(kind)
+        let others = catalog.unmatched(kind)
+        let hasStreams = !streamShelves.isEmpty || !others.isEmpty
         ScrollView {
             VStack(alignment: .leading, spacing: 40) {
                 if items.isEmpty {
                     // bibliothèque vide mais quelque chose arrive : on le montre quand même
                     DownloadingShelf(kind: kind).padding(.top, 90)
-                    EmptyLibrary(kind: kind, compact: !DownloadsModel.shared.visibleEntries(kind: kind, store: store).isEmpty)
+                    if !hasStreams {
+                        EmptyLibrary(kind: kind, compact: !DownloadsModel.shared.visibleEntries(kind: kind, store: store).isEmpty)
+                    }
                 } else {
                     HeroCarousel(items: Array(items.filter { $0.media?.backdropPath != nil }
                         .sorted { ($0.media?.rating ?? 0) > ($1.media?.rating ?? 0) }.prefix(6)))
@@ -362,6 +370,24 @@ struct CategoryPage: View {
                     .buttonStyle(.bordered)
                     .controlSize(.large)
                     .padding(.horizontal, Theme.margin)
+                }
+                // la même page pour les titres des playlists IPTV : mêmes rangées, mêmes affiches, une fiche par titre
+                if hasStreams {
+                    if !iptv.vodCountries.isEmpty {
+                        CountryBar(counts: iptv.vodCountries, total: iptv.vod.count,
+                                   applies: iptv.country.map { c in iptv.vodCountries.contains { $0.code == c } } ?? false)
+                            .padding(.top, items.isEmpty ? 80 : 0)
+                    }
+                    ForEach(streamShelves.prefix(12), id: \.0) { title, results in
+                        TMDbShelf(title: title, results: Array(results.prefix(40)))
+                    }
+                    if !others.isEmpty {
+                        Shelf(title: "Autres titres IPTV") { ForEach(others.prefix(60), id: \.id) { VODCard(item: $0) } }
+                    }
+                    if catalog.pending > 0 {
+                        Label("Rapprochement des titres IPTV avec TMDb : encore \(catalog.pending)", systemImage: "arrow.triangle.2.circlepath")
+                            .font(.system(size: 12)).foregroundStyle(.secondary).padding(.horizontal, Theme.margin)
+                    }
                 }
             }
             .padding(.bottom, 50)

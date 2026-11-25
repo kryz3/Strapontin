@@ -41,6 +41,7 @@ struct SeriesFicheView: View {
         .ignoresSafeArea(edges: .top)
         .background(Theme.background)
         .task { await series.load() }
+        .task { await IPTVCatalog.shared.loadEpisodes(tmdbId) }
         .task(id: series.selected) {
             if let s = series.selected { series.show(season: s) }
         }
@@ -320,7 +321,22 @@ struct EpisodeRow: View {
     @ObservedObject private var tracker = TrackerModel.shared
     @State private var hover = false
 
+    @ObservedObject private var catalog = IPTVCatalog.shared
     private var status: EpisodeStatus { snap.statuses[episode] ?? .unknown }
+
+    private func streamKey(_ v: VODEpisode) -> String { "stream:\(series.key):\(v.season):\(v.episode)" }
+
+    private func streamTitle(_ v: VODEpisode) -> String {
+        let p = IPTVStore.shared.progress[streamKey(v)]
+        return p.map { $0[0] > 30 && $0[0] < $0[1] * 0.95 } ?? false ? "Reprendre en streaming" : "Streaming"
+    }
+
+    private func playStream(_ v: VODEpisode) {
+        let item = VODItem(id: v.id, kind: .series, name: media.title, poster: nil, category: "", plot: nil, rating: nil,
+                           year: media.year, tmdbId: media.tmdbId, url: v.url, seriesId: nil)
+        IPTVCatalog.play(item, url: v.url, mediaKey: series.key, title: media.title,
+                         subtitle: "Saison \(v.season), épisode \(v.episode)", progressKey: streamKey(v))
+    }
     private var file: MediaFile? { snap.files[episode] }
     private var link: String { EpisodeLink.value(series.tmdbId, snap.season, episode) }
 
@@ -335,7 +351,14 @@ struct EpisodeRow: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            trailing.frame(width: 190, alignment: .trailing)
+            VStack(alignment: .trailing, spacing: 8) {
+                trailing
+                if case .owned = status {} else if let v = catalog.episode(series.tmdbId, season: snap.season, episode: episode) {
+                    Button { playStream(v) } label: { SmallPill(title: streamTitle(v), icon: "play.tv", filled: false) }
+                        .buttonStyle(.plain).help("Regarder cet épisode en streaming (IPTV)")
+                }
+            }
+            .frame(width: 190, alignment: .trailing)
         }
         .padding(12)
         .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(.white.opacity(hover ? 0.07 : 0)))

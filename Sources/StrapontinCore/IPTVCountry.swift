@@ -143,6 +143,19 @@ public enum IPTVCountry {
         return (found, out.isEmpty ? text : String(out))
     }
 
+    /// Nom de groupe sans le pays (« FR | Cinéma », « FRANCE Cinéma », « |FR| Cinéma » → « Cinéma ») : le pays est
+    /// déjà dans la barre des pays.
+    public static func groupTitle(_ group: String) -> String {
+        var (_, rest) = stripPrefix(group)
+        let words = rest.split(separator: " ")
+        // « France 2 Régions » : un nombre juste après, c'est le nom d'une chaîne, pas un pays
+        if words.count > 1, !(words[1].first?.isNumber ?? false), code(token: String(words[0]), alone: false) != nil || noise.contains(fold(String(words[0]))) {
+            rest = words.dropFirst().joined(separator: " ")
+            (_, rest) = stripPrefix(rest)
+        }
+        return rest.isEmpty ? group : rest
+    }
+
     public static func detect(tvgCountry: String? = nil, group: String, name: String, tvgId: String? = nil) -> String? {
         if let tc = tvgCountry?.split(whereSeparator: { ",;| ".contains($0) }).first,
            let c = code(token: String(tc), alone: true) { return c }

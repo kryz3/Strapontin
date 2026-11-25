@@ -129,11 +129,23 @@ final class IPTVStore: ObservableObject {
         try? fm.createDirectory(at: cacheDir, withIntermediateDirectories: true)
         if let data = try? Data(contentsOf: configURL), let p = try? JSONDecoder().decode([IPTVPlaylist].self, from: data) { playlists = p }
         if let data = try? Data(contentsOf: stateURL), let s = try? JSONDecoder().decode(State.self, from: data) {
-            favorites = s.favorites; recents = s.recents; progress = s.progress
+            favorites = s.favorites; recents = s.recents; progress = s.progress; streams = s.streams ?? []
         }
     }
 
-    private struct State: Codable { var favorites: [String]; var recents: [String]; var progress: [String: [Double]] }
+    private struct State: Codable {
+        var favorites: [String]; var recents: [String]; var progress: [String: [Double]]
+        var streams: [StreamRecord]?
+    }
+    /// Lectures en streaming (films et épisodes IPTV), les plus récentes d'abord : historique commun.
+    @Published private(set) var streams: [StreamRecord] = []
+
+    func noteStream(_ r: StreamRecord) {
+        streams.removeAll { $0.key == r.key }
+        streams.insert(r, at: 0)
+        if streams.count > 200 { streams.removeLast(streams.count - 200) }
+        saveState()
+    }
     private struct Cache: Codable { var date: Date; var entries: [IPTVEntry]; var guideURL: String?; var vod: [CachedVOD] }
     private struct CachedVOD: Codable {
         var id: String, kind: IPTVKind, name: String, poster: String?, category: String, plot: String?, rating: Double?
@@ -159,7 +171,7 @@ final class IPTVStore: ObservableObject {
     }
 
     private func saveState() {
-        let s = State(favorites: favorites, recents: Array(recents.prefix(30)), progress: progress)
+        let s = State(favorites: favorites, recents: Array(recents.prefix(30)), progress: progress, streams: streams)
         if let data = try? JSONEncoder().encode(s) {
             FileManager.default.createFile(atPath: stateURL.path, contents: data, attributes: [.posixPermissions: 0o600])
         }
@@ -208,6 +220,7 @@ final class IPTVStore: ObservableObject {
         migrateIDs()
         vod = allVOD
         rebuildIndexes()
+        IPTVCatalog.shared.refresh()
         Perf.log("iptv : \(allChannels.count) entrées → \(channels.count) chaînes, \(allVOD.count) titres", since: t0)
         if let g = guides.first { await loadGuide(g, playlist: playlists.first) }
     }
@@ -375,7 +388,8 @@ final class IPTVStore: ObservableObject {
     func playlist(of e: IPTVEntry) -> IPTVPlaylist? { playlists.first { $0.id == e.playlist } ?? playlists.first }
 
     func saveProgress(_ key: String, position: Double, duration: Double) {
-        progress[key] = [position, duration]
+        progress[key] = [position, duration, Date().timeIntervalSince1970]
+        if let i = streams.firstIndex(where: { $0.key == key }) { streams[i].date = Date() }
         saveState()
     }
 
