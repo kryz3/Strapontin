@@ -37,6 +37,16 @@ struct LiveTVView: View {
                 if !store.configured {
                     header.padding(.top, 96)
                     IPTVSetupNotice()
+                } else if store.channels.isEmpty, !store.loading, let e = store.error {
+                    header.padding(.top, 96)
+                    VStack(spacing: 14) {
+                        Image(systemName: "wifi.exclamationmark").font(.system(size: 34)).foregroundStyle(.secondary)
+                        Text("Chaînes indisponibles").font(.system(size: 20, weight: .bold))
+                        Text(e).foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: 520)
+                        Button("Réessayer") { Task { await store.reload(force: true) } }
+                            .buttonStyle(.borderedProminent).controlSize(.large)
+                    }
+                    .frame(maxWidth: .infinity).padding(.top, 60)
                 } else if !query.isEmpty {
                     header.padding(.top, 96)
                     if !store.channelCountries.isEmpty { CountryBar(counts: store.channelCountries, total: store.channels.count) }
@@ -57,6 +67,10 @@ struct LiveTVView: View {
                     if store.channels.isEmpty && store.loading {
                         SkeletonShelf(title: "Chaînes")
                     } else {
+                        if let e = store.error {
+                            Label(e, systemImage: "exclamationmark.triangle.fill").font(.system(size: 13)).foregroundStyle(.orange)
+                                .padding(.horizontal, Theme.margin)
+                        }
                         LazyVStack(alignment: .leading, spacing: 36) {
                             ForEach(groups, id: \.0) { g, list in
                                 Shelf(title: g) {

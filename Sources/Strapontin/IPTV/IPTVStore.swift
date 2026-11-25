@@ -47,6 +47,8 @@ final class IPTVStore: ObservableObject {
     /// Entrée de la playlist → chaîne (pour retrouver d'anciens favoris).
     private var groupOf: [String: String] = [:]
     private var channelByID: [String: IPTVEntry] = [:]
+    /// Entrées telles que la playlist les écrit (pour l'export des noms).
+    private var rawChannels: [IPTVEntry] = []
     /// Qualité choisie par chaîne : identifiant de la variante.
     private var qualityChoice: [String: String] = UserDefaults.standard.dictionary(forKey: "iptvQuality") as? [String: String] ?? [:]
 
@@ -204,7 +206,8 @@ final class IPTVStore: ObservableObject {
                     }
                 } catch {
                     // pas de journal avec l'adresse : seulement le nom de la playlist
-                    self.error = "« \(p.name) » n'a pas pu être chargée : \(error.localizedDescription)"
+                    self.error = "« \(p.name) » : \(Self.explain(error))"
+                        + (cached != nil ? " En attendant, la dernière liste chargée reste utilisable." : "")
                 }
             }
             guard let r = result else { continue }
@@ -212,6 +215,7 @@ final class IPTVStore: ObservableObject {
             allVOD += r.vod.map(\.item)
             if !p.guide.isEmpty { guides.append(p.guide) } else if let g = r.guideURL { guides.append(g) }
         }
+        rawChannels = allChannels
         let grouped = await Task.detached(priority: .userInitiated) { ChannelGrouping.group(allChannels) }.value
         variants = grouped.variants
         groupOf = grouped.groupOf
@@ -286,9 +290,32 @@ final class IPTVStore: ObservableObject {
         return try String(contentsOfFile: (source as NSString).expandingTildeInPath, encoding: .utf8)
     }
 
+    /// Une erreur réseau en clair : injoignable (réseau qui bloque, serveur éteint), accès refusé, panne du serveur.
+    static func explain(_ error: Error) -> String {
+        if let u = error as? URLError {
+            switch u.code {
+            case .notConnectedToInternet, .timedOut, .cannotConnectToHost, .cannotFindHost, .dnsLookupFailed, .networkConnectionLost,
+                 .secureConnectionFailed, .cannotLoadFromNetwork, .internationalRoamingOff:
+                return "serveur injoignable depuis ce réseau (bloqué par la connexion, ou serveur hors ligne). Réessaie plus tard ou sur une autre connexion."
+            default: return "chargement impossible (\(u.localizedDescription))."
+            }
+        }
+        let ns = error as NSError
+        if ns.domain == "IPTV" {
+            switch ns.code {
+            case 401, 403: return "accès refusé par le serveur (identifiants, abonnement expiré, ou réseau bloqué)."
+            case 404: return "adresse introuvable sur le serveur."
+            case 500...599: return "le serveur IPTV a un problème (\(ns.code)). Réessaie plus tard."
+            default: return "le serveur a répondu \(ns.code)."
+            }
+        }
+        return error.localizedDescription
+    }
+
     static func data(_ url: URL?, _ p: IPTVPlaylist?) async throws -> Data {
         guard let url else { throw URLError(.badURL) }
-        var req = URLRequest(url: url, timeoutInterval: 60)
+        // délai d'inactivité : un serveur bloqué ne laisse pas un chargement sans fin
+        var req = URLRequest(url: url, timeoutInterval: 25)
         if let ua = p?.userAgent, !ua.isEmpty { req.setValue(ua, forHTTPHeaderField: "User-Agent") }
         if let r = p?.referer, !r.isEmpty { req.setValue(r, forHTTPHeaderField: "Referer") }
         let (d, resp) = try await URLSession.shared.data(for: req)
@@ -352,7 +379,7 @@ final class IPTVStore: ObservableObject {
             s.contains("://") ? "" : s.replacingOccurrences(of: "\t", with: " ").replacingOccurrences(of: "\n", with: " ")
         }
         var lines = ["type\tgroupe\tnom"]
-        for c in channels { lines.append("direct\t\(clean(c.group))\t\(clean(c.name))") }
+        for c in rawChannels { lines.append("direct\t\(clean(c.group))\t\(clean(c.name))") }
         for v in vod { lines.append("\(v.kind == .series ? "serie" : "film")\t\(clean(v.category))\t\(clean(v.name))") }
         let dir = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
         let url = dir.appendingPathComponent("Strapontin-noms-des-chaines.tsv")
