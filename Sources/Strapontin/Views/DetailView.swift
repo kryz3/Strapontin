@@ -186,7 +186,7 @@ struct LibraryItemButtons: View {
                 PlayPill(title: item.kind == .tv ? "Lire \(item.nextUp.map(tag) ?? "")" : "Lire") { play(item, resume: false) }
             }
             if item.kind == .movie, let m = item.media {
-                StreamButton(kind: .movie, tmdbId: m.tmdbId, title: m.title, libraryFile: item.files.first)
+                StreamButton(kind: .movie, tmdbId: m.tmdbId, titles: [m.title, m.originalTitle ?? ""], year: m.year, libraryFile: item.files.first)
             }
             Button { store.setWatched(item.files.map(\.path), !item.allWatched) } label: {
                 Image(systemName: item.allWatched ? "checkmark.circle.fill" : "checkmark.circle").font(.system(size: 15, weight: .bold))

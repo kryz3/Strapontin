@@ -337,7 +337,7 @@ private struct ForYouCard: View {
                         RemoteImage(url: TMDbClient.imageURL(card.posterPath, size: "w342"))
                     }
                     .frame(width: 190, height: 285)
-                    .overlay(alignment: .bottomTrailing) { StreamBadge(mediaKey: card.id) }
+                    .overlay(alignment: .bottomTrailing) { StreamBadge(kind: card.kind, tmdbId: card.tmdbId, title: card.title, year: card.year) }
                     .clipShape(RoundedRectangle(cornerRadius: Theme.corner, style: .continuous))
                     .shadow(color: .black.opacity(0.5), radius: 18, y: 8)
 
@@ -385,7 +385,7 @@ private struct ForYouCard: View {
 
     private var actions: some View {
         HStack(spacing: 12) {
-            StreamButton(kind: card.kind, tmdbId: card.tmdbId, title: card.title, compact: true)
+            StreamButton(kind: card.kind, tmdbId: card.tmdbId, titles: [card.title, media?.originalTitle ?? ""], year: card.year, compact: true)
             if let state = model.downloadState[card.id] {
                 SmallPill(title: state, icon: "arrow.down.circle", filled: false)
             } else if tracker.configured {

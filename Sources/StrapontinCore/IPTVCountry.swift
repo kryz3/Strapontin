@@ -8,11 +8,12 @@ import Foundation
 public enum IPTVCountry {
     public static let regions: [String: (label: String, flag: String)] = [
         "ARAB": ("Arabe", "🌍"), "EXYU": ("Ex-Yougoslavie", "🌍"), "LATAM": ("Amérique latine", "🌎"),
-        "AFR": ("Afrique", "🌍"), "MAGHREB": ("Maghreb", "🌍"),
+        "AFR": ("Afrique", "🌍"), "MAGHREB": ("Maghreb", "🌍"), "KURD": ("Kurde", "🌍"),
     ]
 
     /// Mots qui ressemblent à un code pays mais n'en sont pas dans une playlist (TV = Tuvalu, HD…).
-    private static let notCountries: Set<String> = ["TV", "HD", "SD", "FM", "VIP", "UHD", "FHD", "4K", "EN", "VO", "VF", "OK", "NO SIGNAL"]
+    private static let notCountries: Set<String> = ["TV", "HD", "SD", "FM", "VIP", "UHD", "FHD", "4K", "EN", "VO", "VF", "OK", "NO SIGNAL",
+                                                    "EU", "AM", "AS", "XX", "XXX", "PPV", "UEFA"]
 
     private static let aliases: [String: String] = [
         "USA": "US", "UK": "GB", "ENGLAND": "GB", "GER": "DE", "DEU": "DE", "ITA": "IT", "ESP": "ES",
@@ -32,6 +33,10 @@ public enum IPTVCountry {
         "DANMARK": "DK", "SUOMI": "FI", "HRVATSKA": "HR", "SRBIJA": "RS", "MAGYARORSZAG": "HU", "CESKO": "CZ",
         "BRASIL": "BR", "SHQIPERIA": "AL",
         "AFR": "AFR", "AFRICA": "AFR", "AFRIQUE": "AFR", "MAGHREB": "MAGHREB",
+        // préfixes relevés dans de vraies listes (« SW| », « IC| », « KU| », « AF| » = Afrique francophone, « DSTV| »)
+        "AF": "AFR", "DSTV": "AFR", "SW": "SE", "IC": "IS", "KU": "KURD", "KURDISH": "KURD", "KURDE": "KURD",
+        "CAR": "LATAM", "CARIBBEAN": "LATAM", "CARAIBES": "LATAM", "TURK": "TR", "UKRAINE": "UA", "PERSIAN": "IR",
+        "HINDI": "IN", "VIETNAM": "VN",
     ]
 
     private static let iso: Set<String> = Set(Locale.Region.isoRegions.map(\.identifier).filter {
@@ -55,7 +60,7 @@ public enum IPTVCountry {
     }
 
     /// Abréviations assez sûres pour valoir même en premier mot d'un titre (« USA Network », « GER Sport »).
-    private static let safeFirstWords: Set<String> = ["USA", "GER", "ITA", "ESP", "FRA", "TUR", "KSA", "UAE", "EXYU", "NED"]
+    private static let safeFirstWords: Set<String> = ["USA", "GER", "ITA", "ESP", "FRA", "TUR", "KSA", "UAE", "EXYU", "NED", "TURK"]
 
     /// Un morceau isolé (entre séparateurs) qui désigne un pays ? Sinon (`alone` faux) un premier mot : noms complets
     /// et abréviations sûres seulement.
@@ -65,6 +70,12 @@ public enum IPTVCountry {
         if let a = aliases[t], alone || t.count >= 5 || safeFirstWords.contains(t) { return a }
         if t.count == 2, iso.contains(t), alone { return t }
         if t.count >= 4, let c = names[t] { return c }
+        // « UEFA-PL », « 24/7-AR », « AR-SP » : un des morceaux
+        if alone, t.contains(where: { $0 == "-" || $0 == "/" }) {
+            for part in t.split(whereSeparator: { $0 == "-" || $0 == "/" }) where part.count >= 2 {
+                if let c = code(token: String(part), alone: true) { return c }
+            }
+        }
         return nil
     }
 
@@ -85,7 +96,12 @@ public enum IPTVCountry {
     /// Dans un groupe ou un nom : drapeau, morceau entre séparateurs, ou premier mot si c'est un nom de pays.
     /// Mots de rangement que les fournisseurs mettent avant le pays (« VOD FR | Action », « VIP UK: Sport »).
     private static let noise: Set<String> = ["VOD", "VIP", "4K", "HD", "FHD", "UHD", "SD", "LIVE", "PPV", "TV", "24/7", "MOVIES",
-                                             "FILMS", "SERIES", "SERIE"]
+                                             "FILMS", "SERIES", "SERIE",
+                                             // continents en tête des groupes (« EU | FRANCE GENERALE », « AM | USA NBC »)
+                                             "EU", "AM", "AS", "XX", "XXX", "TOP",
+                                             // langues après le pays (« IN| TELUGU| Titre »)
+                                             "TELUGU", "TAMIL", "MALAYALAM", "KANNADA", "PUNJABI", "MARATHI", "BENGALI", "GUJARATI",
+                                             "URDU", "MULTI", "MULTI-SUB", "VOSTFR", "VF", "SUB", "DUB"]
 
     private static func dropNoise(_ s: String) -> String {
         var words = s.split(separator: " ", omittingEmptySubsequences: true)
@@ -100,8 +116,12 @@ public enum IPTVCountry {
         let normalized = text.replacingOccurrences(of: " - ", with: "|").replacingOccurrences(of: " – ", with: "|")
         let parts = normalized.components(separatedBy: strong).map { dropNoise($0.trimmingCharacters(in: .whitespaces)) }
         let hasSeparator = parts.count > 1
+        var afterContinent = false
         for p in parts where !p.isEmpty {
             if let c = code(token: p, alone: hasSeparator) { return c }
+            // « EU | UK GENERAL » : après un continent, le premier mot est le pays, même en deux lettres
+            if afterContinent, let w = p.split(separator: " ").first, let c = code(token: String(w), alone: true) { return c }
+            afterContinent = noise.contains(fold(p))
             // « VIP | FRANCE SPORT » : premier mot du morceau
             if hasSeparator, let w = p.split(separator: " ").first, w.count >= 3, let c = code(token: String(w), alone: false) { return c }
         }
@@ -126,14 +146,16 @@ public enum IPTVCountry {
         let separators: [Character] = ["|", ":", "]", ")", "▎", "┃", "│", "»", "-", "–"]
         for _ in 0..<3 {
             rest = rest.drop(while: { $0 == " " || "|[(▎┃│«".contains($0) })
-            // jusqu'au premier séparateur, s'il vient tôt
-            guard let i = rest.prefix(16).firstIndex(where: { separators.contains($0) }) else { break }
+            // jusqu'au premier séparateur, s'il vient tôt ; un tiret ne sépare que s'il est précédé d'une espace
+            // (« FR - TF1 », pas « Canal+ Sport-Live » ni « 24/7-AR| »)
+            let head = rest.prefix(16)
+            guard let i = head.indices.first(where: { j in
+                let c = head[j]
+                guard separators.contains(c) else { return false }
+                if c == "-" || c == "–" { return j > head.startIndex && head[head.index(before: j)] == " " }
+                return true
+            }) else { break }
             let token = rest[..<i].trimmingCharacters(in: .whitespaces)
-            // un tiret ne sépare que s'il est entouré d'espaces (« FR - TF1 », pas « Canal+ Sport-Live »)
-            if rest[i] == "-" || rest[i] == "–" {
-                let before = i > rest.startIndex ? rest[rest.index(before: i)] : " "
-                if before != " " { break }
-            }
             let t = fold(token)
             if let c = code(token: token, alone: true) { found = found ?? c }
             else if !noise.contains(t) { break }
@@ -159,6 +181,8 @@ public enum IPTVCountry {
     public static func detect(tvgCountry: String? = nil, group: String, name: String, tvgId: String? = nil) -> String? {
         if let tc = tvgCountry?.split(whereSeparator: { ",;| ".contains($0) }).first,
            let c = code(token: String(tc), alone: true) { return c }
+        // le préfixe du nom (« FR| CANAL+ », « AF| TF1 ») prime : les groupes mêlent parfois plusieurs pays
+        if let c = stripPrefix(name).0 { return c }
         if let c = fromText(group) ?? fromText(name) { return c }
         if let id = tvgId, let dot = id.lastIndex(of: ".") {
             let suffix = fold(String(id[id.index(after: dot)...]))

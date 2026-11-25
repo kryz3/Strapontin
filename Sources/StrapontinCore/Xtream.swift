@@ -23,6 +23,7 @@ public struct XtreamAccount: Hashable, Sendable {
         return c?.url
     }
 
+    public func liveURL(_ id: Int, ext: String = "ts") -> String { "\(base)/live/\(username)/\(password)/\(id).\(ext)" }
     public func movieURL(_ id: Int, ext: String) -> String { "\(base)/movie/\(username)/\(password)/\(id).\(ext)" }
     public func episodeURL(_ id: String, ext: String) -> String { "\(base)/series/\(username)/\(password)/\(id).\(ext)" }
 }
@@ -99,6 +100,49 @@ public enum XtreamParser {
                            category: cat, plot: s["plot"] as? String, rating: double(s["rating"]),
                            year: (s["releaseDate"] as? String).flatMap { Int($0.prefix(4)) } ?? VODTitle.year(name),
                            tmdbId: int(s["tmdb"]) ?? int(s["tmdb_id"]), url: nil, seriesId: id)
+        }
+    }
+
+    /// get_live_streams : les chaînes, rangées par catégorie. Identifiants stables « <playlist>/x<stream_id> ».
+    public static func liveChannels(_ data: Data, account: XtreamAccount, categories: [String: String], playlist: String) -> [IPTVEntry] {
+        let list = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] ?? []
+        return list.compactMap { c in
+            guard let id = int(c["stream_id"]), let name = c["name"] as? String else { return nil }
+            let group = c["category_id"].map { "\($0)" }.flatMap { categories[$0] } ?? "Autres"
+            let tvg = (c["epg_channel_id"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+            return IPTVEntry(id: "\(playlist)/x\(id)", name: name, url: account.liveURL(id), tvgId: tvg,
+                             logo: (c["stream_icon"] as? String).flatMap { $0.isEmpty ? nil : $0 }, group: group,
+                             number: int(c["num"]), kind: .live, playlist: playlist,
+                             country: IPTVCountry.detect(group: group, name: name, tvgId: tvg))
+        }
+    }
+
+    /// get_vod_streams / get_series : l'index léger des films et séries (pas d'adresse, rebâtie à la lecture).
+    public static func vodRefs(_ data: Data, kind: IPTVKind) -> [VODRef] {
+        let list = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] ?? []
+        return list.compactMap { m in
+            let idKey = kind == .series ? "series_id" : "stream_id"
+            guard let id = int(m[idKey]), let name = m["name"] as? String else { return nil }
+            let ext = (m["container_extension"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+            let year = int(m["year"]) ?? (m["releaseDate"] as? String).flatMap { Int($0.prefix(4)) }
+            let poster = ((m[kind == .series ? "cover" : "stream_icon"]) as? String).flatMap { $0.isEmpty ? nil : $0 }
+            return VODRef(id: "x\(kind == .series ? "s" : "m")\(id)", kind: kind, name: name, tmdb: int(m["tmdb"]) ?? int(m["tmdb_id"]),
+                          stream: id, ext: ext, poster: poster, year: year.flatMap { (1900...2099).contains($0) ? $0 : nil })
+        }
+    }
+
+    /// get_short_epg : ce qui passe et la suite (titres en base64).
+    public static func shortEPG(_ data: Data) -> [ProgramGuide.Program] {
+        guard let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let list = root["epg_listings"] as? [[String: Any]] else { return [] }
+        func text(_ v: Any?) -> String? {
+            guard let s = v as? String else { return nil }
+            return Data(base64Encoded: s).flatMap { String(data: $0, encoding: .utf8) } ?? s
+        }
+        return list.compactMap { e in
+            guard let start = double(e["start_timestamp"]), let stop = double(e["stop_timestamp"]), let t = text(e["title"]) else { return nil }
+            return ProgramGuide.Program(start: Date(timeIntervalSince1970: start), stop: Date(timeIntervalSince1970: stop), title: t,
+                                        detail: text(e["description"]))
         }
     }
 

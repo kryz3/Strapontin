@@ -145,7 +145,7 @@ struct ContentView: View {
         } else if id.hasPrefix("livegroup:") {
             LiveGroupPage(group: String(id.dropFirst(10)))
         } else if id.hasPrefix("vod:") {
-            VODDetailView(itemId: String(id.dropFirst(4)))
+            VODDetailView(itemId: String(id[id.index(id.startIndex, offsetBy: 4)...]))
         } else if id == "history" {
             HistoryView()
         } else if id == "storage" {
@@ -330,23 +330,16 @@ struct StatusPill: View {
 struct CategoryPage: View {
     let kind: MediaKind
     @EnvironmentObject var store: LibraryStore
-    @ObservedObject private var iptv = IPTVStore.shared
-    @ObservedObject private var catalog = IPTVCatalog.shared
 
     var body: some View {
         let items = store.items.filter { $0.kind == kind }
         let genres = GenreRow.rows(items)
-        let streamShelves = catalog.shelves(kind)
-        let others = catalog.unmatched(kind)
-        let hasStreams = !streamShelves.isEmpty || !others.isEmpty
         ScrollView {
             VStack(alignment: .leading, spacing: 40) {
                 if items.isEmpty {
                     // bibliothèque vide mais quelque chose arrive : on le montre quand même
                     DownloadingShelf(kind: kind).padding(.top, 90)
-                    if !hasStreams {
-                        EmptyLibrary(kind: kind, compact: !DownloadsModel.shared.visibleEntries(kind: kind, store: store).isEmpty)
-                    }
+                    EmptyLibrary(kind: kind, compact: !DownloadsModel.shared.visibleEntries(kind: kind, store: store).isEmpty)
                 } else {
                     HeroCarousel(items: Array(items.filter { $0.media?.backdropPath != nil }
                         .sorted { ($0.media?.rating ?? 0) > ($1.media?.rating ?? 0) }.prefix(6)))
@@ -370,24 +363,6 @@ struct CategoryPage: View {
                     .buttonStyle(.bordered)
                     .controlSize(.large)
                     .padding(.horizontal, Theme.margin)
-                }
-                // la même page pour les titres des playlists IPTV : mêmes rangées, mêmes affiches, une fiche par titre
-                if hasStreams {
-                    if !iptv.vodCountries.isEmpty {
-                        CountryBar(counts: iptv.vodCountries, total: iptv.vod.count,
-                                   applies: iptv.country.map { c in iptv.vodCountries.contains { $0.code == c } } ?? false)
-                            .padding(.top, items.isEmpty ? 80 : 0)
-                    }
-                    ForEach(streamShelves.prefix(12), id: \.0) { title, results in
-                        TMDbShelf(title: title, results: Array(results.prefix(40)))
-                    }
-                    if !others.isEmpty {
-                        Shelf(title: "Autres titres IPTV") { ForEach(others.prefix(60), id: \.id) { VODCard(item: $0) } }
-                    }
-                    if catalog.pending > 0 {
-                        Label("Rapprochement des titres IPTV avec TMDb : encore \(catalog.pending)", systemImage: "arrow.triangle.2.circlepath")
-                            .font(.system(size: 12)).foregroundStyle(.secondary).padding(.horizontal, Theme.margin)
-                    }
                 }
             }
             .padding(.bottom, 50)

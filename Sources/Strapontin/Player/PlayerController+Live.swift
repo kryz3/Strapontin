@@ -14,6 +14,7 @@ extension PlayerController {
         let item = PlayItem(path: v?.url ?? e.url, title: e.name, subtitle: e.group, start: 0,
                             live: LiveInfo(entry: e, alternates: store.alternates(e), variants: store.variants(of: e), variantID: v?.id,
                                            userAgent: p?.userAgent ?? "", referer: p?.referer ?? ""))
+        Task { await store.loadShortEPG(e); current?.updateLiveDisplay() }
         if let c = current, c.isLive { c.switchChannel(item); return }
         play([item])
     }
@@ -43,7 +44,7 @@ extension PlayerController {
     func updateLiveDisplay() {
         guard index < queue.count, let live = queue[index].live else { model.live = nil; return }
         let e = live.entry
-        let nn = IPTVStore.shared.guide.nowNext(e.tvgId)
+        let nn = IPTVStore.shared.nowNext(e)
         var d = LiveDisplay(name: e.name, logo: e.logo, number: e.number, group: e.group, now: nn.now, next: nn.next,
                             favorite: IPTVStore.shared.isFavorite(e))
         d.reconnecting = watchdog.isRecovering

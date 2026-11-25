@@ -12,23 +12,14 @@ struct LiveTVView: View {
     static let all = "Toutes"
 
     /// Chaînes du pays choisi.
-    private var inCountry: [IPTVEntry] { store.country == nil ? store.channels : store.channels.filter(store.inCountry) }
 
-    /// Rangées par groupe (« FR | Cinéma » et « FRANCE Cinéma » ensemble), dans l'ordre de la playlist.
-    private var groups: [(String, [IPTVEntry])] {
-        var order: [String] = [], rows: [String: [IPTVEntry]] = [:]
-        for c in inCountry {
-            let t = Self.groupTitle(c.group)
-            if rows[t] == nil { order.append(t) }
-            rows[t, default: []].append(c)
-        }
-        return order.map { ($0, rows[$0]!) }
-    }
+    /// Rangées par groupe (« FR | Cinéma » et « FRANCE Cinéma » ensemble), calculées une fois par pays.
+    private var groups: [(String, [IPTVEntry])] { store.liveRows() }
 
     /// La chaîne en tête : celle qu'on regarde, sinon le premier favori, sinon la dernière regardée.
     private var featured: IPTVEntry? {
         if let c = PlayerController.current, c.isLive, let e = c.queue.first?.live?.entry { return e }
-        return store.favoriteChannels.first ?? store.recentChannels.first ?? inCountry.first
+        return store.favoriteChannels.first ?? store.recentChannels.first ?? store.liveRows().first?.1.first
     }
 
     var body: some View {
@@ -154,7 +145,7 @@ struct LiveGroupPage: View {
             VStack(alignment: .leading, spacing: 18) {
                 Text(group).font(.system(size: 30, weight: .bold))
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 220, maximum: 260), spacing: 22)], alignment: .leading, spacing: 26) {
-                    ForEach(store.channels.filter { LiveTVView.groupTitle($0.group) == group && store.inCountry($0) }) { ChannelCard(channel: $0) }
+                    ForEach(store.liveRows().first { $0.0 == group }?.1 ?? []) { ChannelCard(channel: $0) }
                 }
             }
             .padding(.horizontal, Theme.margin).padding(.top, 96).padding(.bottom, 40)
@@ -192,7 +183,7 @@ struct LiveHero: View {
     @ObservedObject private var store = IPTVStore.shared
 
     var body: some View {
-        let nn = store.guide.nowNext(channel.tvgId)
+        let nn = store.nowNext(channel)
         ZStack(alignment: .bottomLeading) {
             // le logo en grand, flouté, comme fond ; puis le même dégradé que les fiches
             ChannelLogo(logo: channel.logo, name: "", fontSize: 1)
@@ -205,7 +196,7 @@ struct LiveHero: View {
                         Text("EN DIRECT").font(.system(size: 11, weight: .heavy)).padding(.horizontal, 7).padding(.vertical, 3)
                             .background(Theme.accent, in: RoundedRectangle(cornerRadius: 4)).foregroundStyle(.white)
                         if let n = channel.number { Text("\(n)").font(.system(size: 13, weight: .bold).monospacedDigit()).foregroundStyle(.white.opacity(0.7)) }
-                        Text(LiveTVView.groupTitle(channel.group).uppercased()).font(.system(size: 11, weight: .heavy)).kerning(0.8)
+                        Text((store.groupTitle[channel.id] ?? channel.group).uppercased()).font(.system(size: 11, weight: .heavy)).kerning(0.8)
                             .foregroundStyle(.white.opacity(0.6))
                     }
                     Text(channel.name).font(.system(size: 46, weight: .bold)).foregroundStyle(.white).lineLimit(1)
@@ -240,6 +231,7 @@ struct LiveHero: View {
         }
         .frame(height: 400)
         .clipped()
+        .task(id: channel.id) { await store.loadShortEPG(channel) }
     }
 }
 
@@ -252,7 +244,7 @@ struct ChannelCard: View {
     @State private var hover = false
 
     var body: some View {
-        let nn = store.guide.nowNext(channel.tvgId)
+        let nn = store.nowNext(channel)
         let variants = store.variants(of: channel)
         Button { PlayerController.playLive(channel) } label: {
             VStack(alignment: .leading, spacing: 9) {
@@ -301,7 +293,7 @@ struct ChannelCard: View {
                 .scaleEffect(hover ? 1.04 : 1)
                 .shadow(color: .black.opacity(hover ? 0.5 : 0.2), radius: hover ? 16 : 6, y: hover ? 10 : 3)
                 Text(channel.name).font(.system(size: 13, weight: .semibold)).lineLimit(1)
-                Text(nn.now?.title ?? LiveTVView.groupTitle(channel.group)).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1)
+                Text(nn.now?.title ?? store.groupTitle[channel.id] ?? channel.group).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1)
             }
             .frame(width: width)
             .frame(minWidth: width == nil ? 200 : nil, maxWidth: width == nil ? 260 : nil)
@@ -358,108 +350,77 @@ struct IPTVSetupNotice: View {
 
 // MARK: - Catalogue IPTV
 
-/// Fiches TMDb des titres du catalogue IPTV : cherchées à l'affichage, gardées en mémoire.
-@MainActor
-final class VODMatcher: ObservableObject {
-    static let shared = VODMatcher()
-    @Published private(set) var media: [String: Media] = [:]
-    private var asked = Set<String>()
-
-    func match(_ v: VODItem) {
-        guard asked.insert(v.id).inserted else { return }
-        let s = AppSettings.shared
-        guard !s.effectiveTMDbKey.isEmpty else { return }
-        let c = TMDbClient(key: s.effectiveTMDbKey, language: s.tmdbLanguage, omdbKey: s.omdbKey)
-        let kind: MediaKind = v.kind == .series ? .tv : .movie
-        Task {
-            var id = v.tmdbId
-            if id == nil { id = try? await c.bestMatch(kind, title: VODTitle.clean(v.name), year: v.year)?.id }
-            if let id, let m = try? await c.details(kind, id: id) { media[v.id] = m }
-        }
-    }
-}
-
+/// Un titre IPTV trouvé par la recherche (souvent inconnu de TMDb) : même format que les affiches.
 struct VODCard: View {
-    let item: VODItem
-    @ObservedObject private var matcher = VODMatcher.shared
+    let ref: VODRef
     @ObservedObject private var store = IPTVStore.shared
     @State private var hover = false
 
     var body: some View {
-        let m = matcher.media[item.id]
-        NavigationLink(value: "vod:\(item.id)") {
+        NavigationLink(value: "vod:\(ref.id)") {
             VStack(alignment: .leading, spacing: 8) {
                 ZStack {
                     LinearGradient(colors: [Color(white: 0.2), Color(white: 0.11)], startPoint: .top, endPoint: .bottom)
-                    if let p = m?.posterPath {
-                        RemoteImage(url: TMDbClient.imageURL(p, size: "w342"))
-                    } else if let poster = item.poster, let url = URL(string: poster) {
+                    if let poster = ref.poster, let url = URL(string: poster) {
                         RemoteImage(url: url)
                     } else {
-                        GenericPoster(title: VODTitle.clean(item.name), kind: item.kind == .series ? .tv : .movie, subtitle: item.year.map(String.init))
+                        GenericPoster(title: VODTitle.clean(ref.name), kind: ref.kind == .series ? .tv : .movie, subtitle: ref.year.map(String.init))
                     }
                 }
                 .aspectRatio(2 / 3, contentMode: .fit)
                 .clipShape(RoundedRectangle(cornerRadius: Theme.corner, style: .continuous))
-                .overlay(alignment: .bottom) {
-                    if let p = store.progress[item.id], p[1] > 0, p[0] > 0, p[0] < p[1] * 0.95 {
-                        GeometryReader { g in Capsule().fill(Theme.accent).frame(width: g.size.width * p[0] / p[1], height: 3) }
-                            .frame(height: 3).padding(8)
-                    }
-                }
                 .scaleEffect(hover ? 1.04 : 1)
                 .shadow(color: .black.opacity(hover ? 0.5 : 0.2), radius: hover ? 16 : 6, y: hover ? 10 : 3)
-                Text(m?.title ?? VODTitle.clean(item.name)).font(.system(size: 13, weight: .semibold)).lineLimit(1)
-                Text([item.kind == .series ? "Série" : "Film", (m?.year ?? item.year).map(String.init)].compactMap { $0 }.joined(separator: " · "))
-                    .font(.system(size: 12)).foregroundStyle(.secondary)
+                Text(VODTitle.clean(ref.name)).font(.system(size: 13, weight: .semibold)).lineLimit(1)
+                Text([ref.kind == .series ? "Série" : "Film", ref.year.map(String.init), IPTVVOD.sourceLabel(ref.name)]
+                    .compactMap { $0 }.joined(separator: " · "))
+                    .font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1)
             }
             .frame(width: 160)
         }
         .buttonStyle(.plain)
         .onHover { h in withAnimation(.easeOut(duration: 0.18)) { hover = h } }
-        .onAppear { matcher.match(item) }
+        .onAppear { store.remember(ref) }
     }
 }
 
-/// Fiche d'un film ou d'une série du catalogue IPTV : grand visuel TMDb, résumé, distribution, lecture et reprise.
+/// Fiche d'un titre IPTV sans fiche TMDb : lecture et reprise, épisodes par saison pour une série.
 struct VODDetailView: View {
     let itemId: String
     @ObservedObject private var store = IPTVStore.shared
-    @ObservedObject private var matcher = VODMatcher.shared
     @State private var season: Int?
-
-    private var item: VODItem? { store.vod.first { $0.id == itemId } }
 
     var body: some View {
         ScrollView {
-            if let item {
-                let m = matcher.media[item.id]
+            if let r = store.remembered(itemId) {
                 VStack(alignment: .leading, spacing: 30) {
-                    ZStack(alignment: .bottomLeading) {
-                        Color(white: 0.08)
-                        if let b = m?.backdropPath { RemoteImage(url: TMDbClient.imageURL(b, size: "w1280")) }
-                        LinearGradient(colors: [.black.opacity(0.65), .clear], startPoint: .leading, endPoint: .init(x: 0.65, y: 0.5))
-                        LinearGradient(stops: [.init(color: .clear, location: 0.3), .init(color: Theme.background.opacity(0.9), location: 0.88),
-                                               .init(color: Theme.background, location: 1)], startPoint: .top, endPoint: .bottom)
-                        VStack(alignment: .leading, spacing: 12) {
-                            LogoOrTitle(logoPath: m?.logoPath, title: m?.title ?? VODTitle.clean(item.name), maxWidth: 480, maxHeight: 140, fontSize: 44)
-                            Text([item.kind == .series ? "Série" : "Film", (m?.year ?? item.year).map(String.init),
-                                  m?.genres.prefix(3).joined(separator: ", "), (m?.rating ?? item.rating).map { String(format: "★ %.1f", $0) }]
-                                .compactMap { $0 }.joined(separator: " · "))
-                                .font(.system(size: 13, weight: .medium)).foregroundStyle(.white.opacity(0.8))
-                            if let o = m?.overview ?? item.plot, !o.isEmpty {
-                                Text(o).font(.system(size: 14)).foregroundStyle(.white.opacity(0.85)).lineLimit(4).frame(maxWidth: 620, alignment: .leading)
-                            }
-                            if item.kind == .movie, let url = item.url { playButton(item, url: url) }
+                    HStack(alignment: .bottom, spacing: 28) {
+                        ZStack {
+                            Color(white: 0.16)
+                            if let poster = r.poster, let url = URL(string: poster) { RemoteImage(url: url) }
+                            else { GenericPoster(title: VODTitle.clean(r.name), kind: r.kind == .series ? .tv : .movie, subtitle: nil) }
                         }
-                        .padding(.horizontal, Theme.margin).padding(.bottom, 40)
+                        .frame(width: 200, height: 300)
+                        .clipShape(RoundedRectangle(cornerRadius: Theme.corner, style: .continuous))
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text(VODTitle.clean(r.name)).font(.system(size: 40, weight: .bold))
+                            Text([r.kind == .series ? "Série" : "Film", r.year.map(String.init), IPTVVOD.sourceLabel(r.name)]
+                                .compactMap { $0 }.joined(separator: " · ")).foregroundStyle(.secondary)
+                            Text(r.name).font(.system(size: 11)).foregroundStyle(.tertiary)
+                            if r.kind == .movie, let url = store.url(of: r) {
+                                let p = store.progress["stream:" + r.id]
+                                let resume = p.map { $0[0] > 30 && $0[0] < $0[1] * 0.95 } ?? false
+                                PlayPill(title: resume ? "Reprendre" : "Lire") {
+                                    IPTVVOD.play(url: url, mediaKey: nil, title: VODTitle.clean(r.name), progressKey: "stream:" + r.id)
+                                }
+                            }
+                        }
                     }
-                    .frame(height: 560)
-                    if item.kind == .series { episodes(item) }
-                    if let cast = m?.cast, !cast.isEmpty { CastRow(cast: cast) }
+                    .padding(.horizontal, Theme.margin).padding(.top, 110)
+                    if r.kind == .series { episodes(r).padding(.horizontal, Theme.margin) }
                 }
                 .padding(.bottom, 40)
-                .task { matcher.match(item); if item.seriesId != nil { await store.loadEpisodes(item) } }
+                .task { if r.kind == .series { await store.loadEpisodes(r) } }
             } else {
                 ContentUnavailableView("Titre introuvable", systemImage: "questionmark.square.dashed").padding(.top, 160)
             }
@@ -468,17 +429,8 @@ struct VODDetailView: View {
         .background(Theme.background)
     }
 
-    private func playButton(_ item: VODItem, url: String) -> some View {
-        let p = store.progress[item.id]
-        let resume = p.map { $0[0] > 30 && $0[0] < $0[1] * 0.95 } ?? false
-        return PlayPill(title: resume ? "Reprendre" : "Lire") {
-            PlayerController.play([PlayItem(path: url, title: VODTitle.clean(item.name), subtitle: nil,
-                                            start: resume ? p![0] : 0, progressKey: item.id)])
-        }
-    }
-
-    @ViewBuilder private func episodes(_ item: VODItem) -> some View {
-        let list = item.seriesId != nil ? (store.episodes[item.id] ?? []) : store.playlistEpisodes(of: item)
+    @ViewBuilder private func episodes(_ r: VODRef) -> some View {
+        let list = store.episodes[r.id] ?? []
         let seasons = Array(Set(list.map(\.season))).sorted()
         let shown = season ?? seasons.first ?? 1
         VStack(alignment: .leading, spacing: 14) {
@@ -490,13 +442,12 @@ struct VODDetailView: View {
                     .buttonStyle(.plain)
                 }
             }
-            if list.isEmpty { Skeleton(corner: 10).frame(height: 80) }
+            if store.episodes[r.id] == nil { Skeleton(corner: 10).frame(height: 80) }
             ForEach(list.filter { $0.season == shown }) { e in
-                let p = store.progress[e.id]
+                let key = "stream:\(r.id):\(e.season):\(e.episode)"
                 Button {
-                    let resume = p.map { $0[0] > 30 && $0[0] < $0[1] * 0.95 } ?? false
-                    PlayerController.play([PlayItem(path: e.url, title: VODTitle.clean(item.name), subtitle: "Saison \(e.season), épisode \(e.episode) · \(e.title)",
-                                                    start: resume ? p![0] : 0, progressKey: e.id)])
+                    IPTVVOD.play(url: e.url, mediaKey: nil, title: VODTitle.clean(r.name),
+                                 subtitle: "Saison \(e.season), épisode \(e.episode) · \(e.title)", progressKey: key)
                 } label: {
                     HStack(spacing: 14) {
                         ZStack {
@@ -506,22 +457,17 @@ struct VODDetailView: View {
                         }
                         .frame(width: 160, height: 90).clipShape(RoundedRectangle(cornerRadius: 8))
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("\(e.episode). \(e.title)").font(.system(size: 14, weight: .semibold)).lineLimit(1)
-                            if let plot = e.plot, !plot.isEmpty { Text(plot).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(2) }
-                            if let p, p[1] > 0, p[0] > 0 {
-                                ProgressView(value: min(1, p[0] / p[1])).tint(Theme.accent).frame(width: 160)
-                            }
+                            Text("ÉPISODE \(e.episode)").font(.system(size: 10, weight: .heavy)).foregroundStyle(.secondary)
+                            Text(e.title).font(.system(size: 14, weight: .semibold)).lineLimit(1)
+                            if let plot = e.plot { Text(plot).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(2) }
                         }
                         Spacer()
                     }
-                    .padding(8)
-                    .background(RoundedRectangle(cornerRadius: 12).fill(.white.opacity(0.04)))
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
             }
         }
-        .padding(.horizontal, Theme.margin)
     }
 }
 
@@ -565,7 +511,7 @@ struct IPTVSettings: View {
                     }
                 }
                 if store.configured {
-                    Text("\(store.channels.count) chaînes · \(store.vod.filter { $0.kind == .movie }.count) films · \(store.catalogItems.filter { $0.kind == .series }.count) séries")
+                    Text("\(store.channels.count) chaînes · \(store.vodLookup.refs.lazy.filter { $0.kind == .movie }.count) films · \(store.vodLookup.refs.lazy.filter { $0.kind == .series && ($0.episode ?? 1) == 1 }.count) séries" + (store.vodLoading ? " · index en cours…" : ""))
                         .foregroundStyle(.secondary)
                 }
                 if let e = store.error { Label(e, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange) }

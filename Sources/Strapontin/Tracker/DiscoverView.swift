@@ -434,7 +434,7 @@ struct TMDbPosterCard: View {
                     }
                 }
                 .overlay { DownloadOverlay(mediaKey: Media.key(result.kind, result.id)) }
-                .overlay(alignment: .bottomTrailing) { StreamBadge(mediaKey: Media.key(result.kind, result.id)) }
+                .overlay(alignment: .bottomTrailing) { StreamBadge(kind: result.kind, tmdbId: result.id, title: result.title, year: result.year) }
                 .overlay(alignment: .bottomLeading) {
                     if !owned, let n = versions {
                         Badge(text: n > 0 ? "\(n) VERSION\(n > 1 ? "S" : "")" : "INDISPONIBLE",
@@ -576,7 +576,7 @@ struct PreviewDetailView: View {
     @ViewBuilder
     private func primaryButtons(_ m: Media) -> some View {
             // trois façons de regarder, selon ce qui est disponible : la bibliothèque, le streaming IPTV, le téléchargement
-            StreamButton(kind: kind, tmdbId: tmdbId, title: m.title)
+            StreamButton(kind: kind, tmdbId: tmdbId, titles: [m.title, m.originalTitle ?? ""], year: m.year)
             if let item = store.item(id: key) {
                 // arrivé dans la bibliothèque (la page bascule aussi d'elle-même sur la fiche complète)
                 PlayPill(title: "Lire") { play(item, resume: false) }

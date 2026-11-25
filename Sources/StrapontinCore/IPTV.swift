@@ -284,6 +284,9 @@ public struct ProgramGuide: Sendable {
         public var stop: Date
         public var title: String
         public var detail: String?
+        public init(start: Date, stop: Date, title: String, detail: String? = nil) {
+            self.start = start; self.stop = stop; self.title = title; self.detail = detail
+        }
     }
     public private(set) var programs: [String: [Program]] = [:]
 

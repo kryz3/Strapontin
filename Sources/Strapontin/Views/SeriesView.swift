@@ -41,7 +41,11 @@ struct SeriesFicheView: View {
         .ignoresSafeArea(edges: .top)
         .background(Theme.background)
         .task { await series.load() }
-        .task { await IPTVCatalog.shared.loadEpisodes(tmdbId) }
+        .task(id: series.media?.title) {
+            if let m = series.media ?? item?.media {
+                await SeriesStreams.of(tmdbId).load(tmdbId: tmdbId, titles: [m.title, m.originalTitle ?? ""], year: m.year)
+            }
+        }
         .task(id: series.selected) {
             if let s = series.selected { series.show(season: s) }
         }
@@ -321,7 +325,7 @@ struct EpisodeRow: View {
     @ObservedObject private var tracker = TrackerModel.shared
     @State private var hover = false
 
-    @ObservedObject private var catalog = IPTVCatalog.shared
+    @ObservedObject private var store = IPTVStore.shared
     private var status: EpisodeStatus { snap.statuses[episode] ?? .unknown }
 
     private func streamKey(_ v: VODEpisode) -> String { "stream:\(series.key):\(v.season):\(v.episode)" }
@@ -332,10 +336,8 @@ struct EpisodeRow: View {
     }
 
     private func playStream(_ v: VODEpisode) {
-        let item = VODItem(id: v.id, kind: .series, name: media.title, poster: nil, category: "", plot: nil, rating: nil,
-                           year: media.year, tmdbId: media.tmdbId, url: v.url, seriesId: nil)
-        IPTVCatalog.play(item, url: v.url, mediaKey: series.key, title: media.title,
-                         subtitle: "Saison \(v.season), épisode \(v.episode)", progressKey: streamKey(v))
+        IPTVVOD.play(url: v.url, mediaKey: series.key, title: media.title,
+                     subtitle: "Saison \(v.season), épisode \(v.episode)", progressKey: streamKey(v))
     }
     private var file: MediaFile? { snap.files[episode] }
     private var link: String { EpisodeLink.value(series.tmdbId, snap.season, episode) }
@@ -353,7 +355,7 @@ struct EpisodeRow: View {
             .buttonStyle(.plain)
             VStack(alignment: .trailing, spacing: 8) {
                 trailing
-                if case .owned = status {} else if let v = catalog.episode(series.tmdbId, season: snap.season, episode: episode) {
+                if case .owned = status {} else if let v = SeriesStreams.of(series.tmdbId).episode(season: snap.season, episode: episode) {
                     Button { playStream(v) } label: { SmallPill(title: streamTitle(v), icon: "play.tv", filled: false) }
                         .buttonStyle(.plain).help("Regarder cet épisode en streaming (IPTV)")
                 }

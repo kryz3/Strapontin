@@ -41,7 +41,7 @@ public enum ChannelName {
     private static let technicalWords: Set<String> = [
         "HEVC", "H265", "H.265", "H264", "H.264", "X265", "X264", "50FPS", "60FPS", "25FPS", "30FPS", "FPS", "RAW",
         "VIP", "MULTI", "MULTIAUDIO", "PPV", "★", "VO", "VF", "VOSTFR",
-        "HDR", "SDR", "DOLBY", "ATMOS", "AAC", "AC3", "MUX",
+        "HDR", "SDR", "DOLBY", "ATMOS", "AAC", "AC3", "MUX", "EVENT", "ONLY", "BK", "LQ",
     ]
 
     // MARK: alias des grandes chaînes (clé → nom affiché)
@@ -99,6 +99,30 @@ public enum ChannelName {
         "huit": "8", "neuf": "9", "dix": "10",
         "ii": "2", "iii": "3", "iv": "4", "vi": "6", "vii": "7", "viii": "8", "ix": "9",
     ]
+
+    // MARK: lignes de séparation
+
+    /// Les fournisseurs glissent des intertitres dans la liste des chaînes (« ✦●✦| CANAL+ FRANCE |✦●✦ »,
+    /// « ##### SPORT ##### ») : ce ne sont pas des chaînes.
+    public static func isDecorative(_ raw: String) -> Bool {
+        let t = raw.trimmingCharacters(in: .whitespaces)
+        guard let first = t.unicodeScalars.first else { return true }
+        func decoration(_ sc: Unicode.Scalar) -> Bool {
+            (sc.value > 0x7F && [.otherSymbol, .mathSymbol, .otherPunctuation, .dashPunctuation].contains(sc.properties.generalCategory))
+                || "#=*~_".unicodeScalars.contains(sc)
+        }
+        if decoration(first), first.value > 0x7F { return true }
+        // trois signes ASCII répétés en tête et en queue : « ##### SPORT ##### », « ===== CINÉMA ===== »
+        let lead = t.unicodeScalars.prefix { decoration($0) }
+        let trail = t.unicodeScalars.reversed().prefix { decoration($0) }
+        return lead.count >= 3 && trail.count >= 3
+    }
+
+    /// Groupe « Account Information » (date d'expiration…) : des lignes d'information, pas des chaînes.
+    public static func isAccountInfo(_ group: String) -> Bool {
+        let g = group.uppercased()
+        return (g.contains("ACCOUNT") || g.contains("ACCOUT")) && g.contains("INFO")
+    }
 
     // MARK: analyse
 
@@ -260,7 +284,7 @@ public enum ChannelGrouping {
     public static func group(_ entries: [IPTVEntry]) -> Result {
         var order: [String] = []
         var members: [String: [(IPTVEntry, ChannelName.Parsed, Int)]] = [:]
-        for (i, e) in entries.enumerated() {
+        for (i, e) in entries.enumerated() where !ChannelName.isDecorative(e.name) && !ChannelName.isAccountInfo(e.group) {
             let p = ChannelName.parse(e.name)
             let country = e.country ?? p.country ?? ""
             let gid = "ch:\(country)|\(p.key.isEmpty ? e.id : p.key)"

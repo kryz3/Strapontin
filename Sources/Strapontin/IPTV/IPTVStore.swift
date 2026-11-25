@@ -17,26 +17,33 @@ struct IPTVPlaylist: Codable, Identifiable, Hashable {
     var refreshHours: Int = 12
 }
 
-/// Les chaînes, le catalogue à la demande, le guide, les favoris et la reprise de lecture.
+/// Les chaînes, l'index des films et séries, le guide, les favoris et la reprise de lecture.
+///
+/// Chargement progressif, sans jamais figer l'interface : les chaînes d'abord (depuis le cache disque, puis l'API
+/// Xtream si elles ont plus d'un jour), puis en fond l'index léger des films et séries. Une playlist sans API Xtream
+/// est lue en entier, une fois par jour au plus.
 @MainActor
 final class IPTVStore: ObservableObject {
     static let shared = IPTVStore()
 
     @Published private(set) var playlists: [IPTVPlaylist] = []
     @Published private(set) var channels: [IPTVEntry] = []
-    @Published private(set) var vod: [VODItem] = []
     @Published private(set) var guide = ProgramGuide()
     @Published private(set) var loading = false
     @Published var error: String?
     @Published private(set) var favorites: [String] = []
     @Published private(set) var recents: [String] = []
-    /// Reprise des films et épisodes à la demande : clé → (position, durée).
+    /// Reprise des films et épisodes à la demande : clé → (position, durée, date).
     @Published private(set) var progress: [String: [Double]] = [:]
-    /// Recherche : index préparé en tâche de fond.
+    /// Recherche des chaînes : index préparé en tâche de fond.
     private(set) var channelIndex = IPTVSearchIndex([])
-    private(set) var vodIndex = IPTVSearchIndex([])
-    /// Épisodes déjà demandés (séries Xtream).
+    /// Films et séries : index léger (titre normalisé, année, id TMDb) pour la recherche depuis une fiche.
+    @Published private(set) var vodLookup = VODLookup()
+    @Published private(set) var vodLoading = false
+    /// Épisodes déjà demandés (séries Xtream), par référence.
     @Published private(set) var episodes: [String: [VODEpisode]] = [:]
+    /// Programme court (Xtream get_short_epg) des chaînes affichées.
+    @Published private(set) var shortEPG: [String: [ProgramGuide.Program]] = [:]
 
     var configured: Bool { !playlists.isEmpty }
 
@@ -49,6 +56,10 @@ final class IPTVStore: ObservableObject {
     private var channelByID: [String: IPTVEntry] = [:]
     /// Entrées telles que la playlist les écrit (pour l'export des noms).
     private var rawChannels: [IPTVEntry] = []
+    /// Nom de rangée de chaque chaîne (« EU | FRANCE SPORTS » → « Sports »), calculé une fois.
+    private(set) var groupTitle: [String: String] = [:]
+    /// Rangées d'« En direct » par pays, calculées une fois par pays.
+    private var rowsCache: [String: [(String, [IPTVEntry])]] = [:]
     /// Qualité choisie par chaîne : identifiant de la variante.
     private var qualityChoice: [String: String] = UserDefaults.standard.dictionary(forKey: "iptvQuality") as? [String: String] ?? [:]
 
@@ -65,14 +76,27 @@ final class IPTVStore: ObservableObject {
         UserDefaults.standard.set(qualityChoice, forKey: "iptvQuality")
     }
 
+    /// Rangées d'« En direct » pour le pays choisi : (titre, chaînes), dans l'ordre de la playlist.
+    func liveRows() -> [(String, [IPTVEntry])] {
+        let key = country ?? "*"
+        if let r = rowsCache[key] { return r }
+        var order: [String] = [], rows: [String: [IPTVEntry]] = [:]
+        for c in channels where inCountry(c) {
+            let t = groupTitle[c.id] ?? c.group
+            if rows[t] == nil { order.append(t) }
+            rows[t, default: []].append(c)
+        }
+        let out = order.map { ($0, rows[$0]!) }
+        rowsCache[key] = out
+        return out
+    }
+
     // MARK: pays
 
-    /// Pays présents, avec leur nombre de chaînes / titres ; « » = sans pays reconnu.
+    /// Pays présents, avec leur nombre de chaînes ; « » = sans pays reconnu.
     @Published private(set) var channelCountries: [CountryCount] = []
-    @Published private(set) var vodCountries: [CountryCount] = []
     private(set) var countryOfChannel: [String: String] = [:]
-    private(set) var countryOfVOD: [String: String] = [:]
-    /// Pays choisi dans « En direct » et le catalogue (nil = tous).
+    /// Pays choisi dans « En direct » (nil = tous).
     @Published var country: String? {
         didSet { UserDefaults.standard.set(country ?? "*", forKey: "iptvCountry") }
     }
@@ -87,15 +111,12 @@ final class IPTVStore: ObservableObject {
     }
 
     func countryCode(of e: IPTVEntry) -> String { countryOfChannel[e.id] ?? "" }
-    func countryCode(of v: VODItem) -> String { countryOfVOD[v.id] ?? "" }
     func inCountry(_ e: IPTVEntry) -> Bool { country == nil || countryCode(of: e) == country }
-    func inCountry(_ v: VODItem) -> Bool { country == nil || countryCode(of: v) == country }
 
     func toggleFavoriteCountry(_ code: String) {
         if let i = favoriteCountries.firstIndex(of: code) { favoriteCountries.remove(at: i) } else { favoriteCountries.append(code) }
         UserDefaults.standard.set(favoriteCountries, forKey: "iptvFavoriteCountries")
         channelCountries = ordered(channelCountries)
-        vodCountries = ordered(vodCountries)
     }
 
     /// Pays favoris d'abord, puis par nombre de chaînes ; « Autres » à la fin.
@@ -114,9 +135,9 @@ final class IPTVStore: ObservableObject {
         let saved = UserDefaults.standard.string(forKey: "iptvCountry")
         let codes = Set(channelCountries.map(\.code))
         if saved == "*" { country = nil }
-        else if let saved, codes.contains(saved) || vodCountries.contains(where: { $0.code == saved }) { country = saved }
+        else if let saved, codes.contains(saved) { country = saved }
         else if saved == nil, codes.contains("FR") { country = "FR" }
-        else if let c = country, !codes.contains(c), !vodCountries.contains(where: { $0.code == c }) { country = nil }
+        else if let c = country, !codes.contains(c) { country = nil }
     }
 
     private let dir: URL
@@ -148,19 +169,8 @@ final class IPTVStore: ObservableObject {
         if streams.count > 200 { streams.removeLast(streams.count - 200) }
         saveState()
     }
-    private struct Cache: Codable { var date: Date; var entries: [IPTVEntry]; var guideURL: String?; var vod: [CachedVOD] }
-    private struct CachedVOD: Codable {
-        var id: String, kind: IPTVKind, name: String, poster: String?, category: String, plot: String?, rating: Double?
-        var year: Int?, tmdbId: Int?, url: String?, seriesId: Int?
-        init(_ v: VODItem) {
-            id = v.id; kind = v.kind; name = v.name; poster = v.poster; category = v.category; plot = v.plot; rating = v.rating
-            year = v.year; tmdbId = v.tmdbId; url = v.url; seriesId = v.seriesId
-        }
-        var item: VODItem {
-            VODItem(id: id, kind: kind, name: name, poster: poster, category: category, plot: plot, rating: rating, year: year,
-                    tmdbId: tmdbId, url: url, seriesId: seriesId)
-        }
-    }
+    private struct LiveCache: Codable { var date: Date; var entries: [IPTVEntry]; var guideURL: String? }
+    private struct VODCache: Codable { var date: Date; var refs: [VODRef] }
 
     // MARK: playlists
 
@@ -179,107 +189,165 @@ final class IPTVStore: ObservableObject {
         }
     }
 
-    /// Au lancement : le cache tout de suite, puis un rafraîchissement si une playlist est trop ancienne.
+    /// Au lancement : le cache tout de suite, puis un rafraîchissement en fond si une playlist est trop ancienne.
     func start() {
         guard configured else { return }
         Task { await reload(force: false) }
     }
 
-    func reload(force: Bool) async {
-        guard !playlists.isEmpty else { channels = []; vod = []; rebuildIndexes(); return }
-        loading = true
-        defer { loading = false }
-        error = nil
-        var allChannels: [IPTVEntry] = []
-        var allVOD: [VODItem] = []
-        var guides: [String] = []
-        let t0 = ContinuousClock.now
-        for p in playlists {
-            let cacheFile = cacheDir.appendingPathComponent("\(p.id).json")
-            let cached = (try? Data(contentsOf: cacheFile)).flatMap { try? JSONDecoder().decode(Cache.self, from: $0) }
-            var result = cached
-            if force || cached == nil || Date().timeIntervalSince(cached!.date) > Double(p.refreshHours) * 3600 {
-                do {
-                    result = try await Self.fetch(p)
-                    if let data = try? JSONEncoder().encode(result) {
-                        FileManager.default.createFile(atPath: cacheFile.path, contents: data, attributes: [.posixPermissions: 0o600])
-                    }
-                } catch {
-                    // pas de journal avec l'adresse : seulement le nom de la playlist
-                    self.error = "« \(p.name) » : \(Self.explain(error))"
-                        + (cached != nil ? " En attendant, la dernière liste chargée reste utilisable." : "")
-                }
-            }
-            guard let r = result else { continue }
-            allChannels += r.entries.filter { $0.kind == .live }
-            allVOD += r.vod.map(\.item)
-            if !p.guide.isEmpty { guides.append(p.guide) } else if let g = r.guideURL { guides.append(g) }
+    private func cacheFile(_ p: IPTVPlaylist, _ part: String) -> URL { cacheDir.appendingPathComponent("\(p.id)-\(part).json") }
+
+    private func stale(_ date: Date, _ p: IPTVPlaylist) -> Bool {
+        Date().timeIntervalSince(date) > Double(max(6, p.refreshHours)) * 3600
+    }
+
+    private static func write<T: Encodable>(_ value: T, to url: URL) {
+        if let data = try? JSONEncoder().encode(value) {
+            FileManager.default.createFile(atPath: url.path, contents: data, attributes: [.posixPermissions: 0o600])
         }
-        rawChannels = allChannels
-        let grouped = await Task.detached(priority: .userInitiated) { ChannelGrouping.group(allChannels) }.value
-        variants = grouped.variants
-        groupOf = grouped.groupOf
-        channelByID = Dictionary(grouped.channels.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
-        channels = grouped.channels
-        migrateIDs()
-        vod = allVOD
-        rebuildIndexes()
-        IPTVCatalog.shared.refresh()
-        Perf.log("iptv : \(allChannels.count) entrées → \(channels.count) chaînes, \(allVOD.count) titres", since: t0)
+    }
+
+    private static func read<T: Decodable & Sendable>(_ type: T.Type, _ url: URL) async -> T? {
+        await Task.detached(priority: .userInitiated) {
+            (try? Data(contentsOf: url)).flatMap { try? JSONDecoder().decode(T.self, from: $0) }
+        }.value
+    }
+
+    func reload(force: Bool) async {
+        guard !playlists.isEmpty else { await applyChannels([]); vodLookup = VODLookup(); return }
+        loading = true
+        error = nil
+        let t0 = ContinuousClock.now
+        // ancien cache d'une version précédente (playlist complète, très lourd) : il ne sert plus
+        for p in playlists { try? FileManager.default.removeItem(at: cacheDir.appendingPathComponent("\(p.id).json")) }
+
+        // 1. les chaînes, du cache disque, tout de suite
+        var live: [String: LiveCache] = [:]
+        for p in playlists { live[p.id] = await Self.read(LiveCache.self, cacheFile(p, "live")) }
+        if live.values.contains(where: { !$0.entries.isEmpty }) {
+            await applyChannels(playlists.flatMap { live[$0.id]?.entries ?? [] })
+            Perf.log("iptv : chaînes du cache (\(channels.count))", since: t0)
+        }
+        // 2. les chaînes à jour (API Xtream, ou playlist complète une fois par jour)
+        var m3uVOD: [String: [VODRef]] = [:]
+        var fetched = false
+        for p in playlists where force || live[p.id].map({ stale($0.date, p) }) ?? true {
+            do {
+                let r = try await Self.fetchLive(p)
+                live[p.id] = LiveCache(date: Date(), entries: r.entries, guideURL: r.guideURL)
+                fetched = true
+                Self.write(live[p.id]!, to: cacheFile(p, "live"))
+                if let v = r.vod { m3uVOD[p.id] = v; Self.write(VODCache(date: Date(), refs: v), to: cacheFile(p, "vod")) }
+            } catch {
+                // pas de journal avec l'adresse : seulement le nom de la playlist
+                self.error = "« \(p.name) » : \(Self.explain(error))"
+                    + (live[p.id] != nil ? " En attendant, la dernière liste chargée reste utilisable." : "")
+            }
+        }
+        if fetched || channels.isEmpty { await applyChannels(playlists.flatMap { live[$0.id]?.entries ?? [] }) }
+        loading = false
+        Perf.log("iptv : \(rawChannels.count) entrées → \(channels.count) chaînes", since: t0)
+        let guides = playlists.compactMap { p in p.guide.isEmpty ? live[p.id]?.guideURL : p.guide }
+        // 3. en fond : l'index des films et séries, puis le guide
+        Task { await loadVOD(force: force, fresh: m3uVOD) }
         if let g = guides.first { await loadGuide(g, playlist: playlists.first) }
     }
 
-    private func rebuildIndexes() {
-        let ch = channels
-        let v = vod.map { IPTVEntry(id: $0.id, name: $0.name, url: $0.url ?? "", tvgId: nil, logo: $0.poster, group: $0.category,
-                                    number: nil, kind: $0.kind, playlist: "") }
-        Task.detached(priority: .userInitiated) {
-            let a = IPTVSearchIndex(ch, channelNames: true), b = IPTVSearchIndex(v)
-            var cc: [String: String] = [:], vc: [String: String] = [:]
-            var cn: [String: Int] = [:], vn: [String: Int] = [:]
-            for e in ch {
+    /// Les chaînes à l'écran : regroupées (variantes), pays, rangées, index de recherche, tout hors du fil principal.
+    private func applyChannels(_ all: [IPTVEntry]) async {
+        rawChannels = all
+        let prepared = await Task.detached(priority: .userInitiated) { () -> PreparedChannels in
+            let grouped = ChannelGrouping.group(all)
+            var cc: [String: String] = [:], cn: [String: Int] = [:], titles: [String: String] = [:]
+            for e in grouped.channels {
                 let c = e.country ?? IPTVCountry.detect(group: e.group, name: e.name, tvgId: e.tvgId) ?? ""
                 cc[e.id] = c; cn[c, default: 0] += 1
+                titles[e.id] = IPTVCountry.groupTitle(e.group)
             }
-            for e in v {
-                let c = IPTVCountry.detect(group: e.group, name: e.name) ?? ""
-                vc[e.id] = c; vn[c, default: 0] += 1
-            }
-            let chMap = cc, vMap = vc
-            let chCounts = cn.map { CountryCount(code: $0.key, count: $0.value) }
-            let vCounts = vn.map { CountryCount(code: $0.key, count: $0.value) }
-            await MainActor.run {
-                self.channelIndex = a; self.vodIndex = b
-                self.countryOfChannel = chMap; self.countryOfVOD = vMap
-                // un seul « Autres » sans aucun pays reconnu : pas de barre de pays
-                self.channelCountries = chCounts.contains(where: { !$0.code.isEmpty }) ? self.ordered(chCounts) : []
-                self.vodCountries = vCounts.contains(where: { !$0.code.isEmpty }) ? self.ordered(vCounts) : []
-                self.restoreCountry()
-                self.objectWillChange.send()
-            }
+            return PreparedChannels(grouped: grouped, index: IPTVSearchIndex(grouped.channels, channelNames: true),
+                                    countryOf: cc, counts: cn.map { CountryCount(code: $0.key, count: $0.value) }, titles: titles)
+        }.value
+        variants = prepared.grouped.variants
+        groupOf = prepared.grouped.groupOf
+        channelByID = Dictionary(prepared.grouped.channels.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        countryOfChannel = prepared.countryOf
+        groupTitle = prepared.titles
+        channelIndex = prepared.index
+        rowsCache = [:]
+        // un seul « Autres » sans aucun pays reconnu : pas de barre de pays
+        channelCountries = prepared.counts.contains(where: { !$0.code.isEmpty }) ? ordered(prepared.counts) : []
+        channels = prepared.grouped.channels
+        migrateIDs()
+        restoreCountry()
+    }
+
+    private struct PreparedChannels: Sendable {
+        var grouped: ChannelGrouping.Result
+        var index: IPTVSearchIndex
+        var countryOf: [String: String]
+        var counts: [CountryCount]
+        var titles: [String: String]
+    }
+
+    /// L'index des films et séries : du cache, puis à jour une fois par jour (API Xtream), en fond.
+    private func loadVOD(force: Bool, fresh: [String: [VODRef]]) async {
+        vodLoading = true
+        defer { vodLoading = false }
+        let t0 = ContinuousClock.now
+        var refs: [String: [VODRef]] = fresh
+        var stalePlaylists: [IPTVPlaylist] = []
+        for p in playlists where refs[p.id] == nil {
+            let c = await Self.read(VODCache.self, cacheFile(p, "vod"))
+            if let c { refs[p.id] = c.refs }
+            if force || c.map({ stale($0.date, p) }) ?? true { stalePlaylists.append(p) }
+        }
+        vodLookup = await Task.detached(priority: .utility) { VODLookup(refs.values.flatMap { $0 }) }.value
+        Perf.log("iptv : index films/séries du cache (\(vodLookup.count))", since: t0)
+        for p in stalePlaylists {
+            guard let account = XtreamAccount.from(playlistURL: p.source) else { continue }   // sans API : déjà lu avec les chaînes
+            guard let v = try? await Self.fetchVOD(account, p) else { continue }
+            refs[p.id] = v
+            Self.write(VODCache(date: Date(), refs: v), to: cacheFile(p, "vod"))
+        }
+        if !stalePlaylists.isEmpty {
+            vodLookup = await Task.detached(priority: .utility) { VODLookup(refs.values.flatMap { $0 }) }.value
+            Perf.log("iptv : index films/séries à jour (\(vodLookup.count))", since: t0)
         }
     }
 
-    /// Télécharge et lit une playlist (et, pour un fournisseur Xtream, son catalogue à la demande), hors du fil principal.
-    private static func fetch(_ p: IPTVPlaylist) async throws -> Cache {
-        let text = try await load(p.source, p)
-        let parsed = await Task.detached(priority: .userInitiated) { M3UParser.parse(text, playlist: p.id) }.value
-        var vod: [VODItem] = parsed.entries.filter { $0.kind != .live }.map {
-            VODItem(id: $0.id, kind: $0.kind, name: $0.name, poster: $0.logo, category: $0.group, plot: nil, rating: nil,
-                    year: VODTitle.year($0.name), tmdbId: nil, url: $0.url, seriesId: nil)
-        }
+    private struct LiveResult: Sendable { var entries: [IPTVEntry]; var guideURL: String?; var vod: [VODRef]? }
+
+    /// Les chaînes : API Xtream (légère : chaînes seules), sinon la playlist complète (chaînes + films et séries).
+    private static func fetchLive(_ p: IPTVPlaylist) async throws -> LiveResult {
         if let account = XtreamAccount.from(playlistURL: p.source) {
-            // le catalogue de l'API, mieux rangé que les entrées de la playlist
-            async let vc = data(account.api("get_vod_categories"), p)
-            async let vs = data(account.api("get_vod_streams"), p)
-            async let sc = data(account.api("get_series_categories"), p)
-            async let ss = data(account.api("get_series"), p)
-            let (vcats, vstreams, scats, series) = try await (vc, vs, sc, ss)
-            let movies = XtreamParser.movies(vstreams, account: account, categories: XtreamParser.categories(vcats))
-            let shows = XtreamParser.series(series, categories: XtreamParser.categories(scats))
-            if !movies.isEmpty || !shows.isEmpty { vod = movies + shows }
+            async let cats = data(account.api("get_live_categories"), p)
+            async let streams = data(account.api("get_live_streams"), p)
+            let (c, s) = try await (cats, streams)
+            let entries = await Task.detached(priority: .userInitiated) {
+                XtreamParser.liveChannels(s, account: account, categories: XtreamParser.categories(c), playlist: p.id)
+            }.value
+            if !entries.isEmpty { return LiveResult(entries: entries, guideURL: nil, vod: nil) }
         }
-        return Cache(date: Date(), entries: parsed.entries, guideURL: parsed.guideURL, vod: vod.map(CachedVOD.init))
+        let text = try await load(p.source, p)
+        return await Task.detached(priority: .userInitiated) {
+            let parsed = M3UParser.parse(text, playlist: p.id)
+            var live: [IPTVEntry] = [], vod: [VODRef] = []
+            for e in parsed.entries {
+                if e.kind == .live { live.append(e); continue }
+                let ep = e.kind == .series ? VODMatch.episode(e.name) : nil
+                vod.append(VODRef(id: e.id, kind: e.kind, name: e.name, url: e.url, season: ep?.season, episode: ep?.episode, poster: e.logo))
+            }
+            return LiveResult(entries: live, guideURL: parsed.guideURL, vod: vod)
+        }.value
+    }
+
+    /// Films et séries d'un compte Xtream : deux listes, réduites à l'index léger hors du fil principal.
+    private static func fetchVOD(_ account: XtreamAccount, _ p: IPTVPlaylist) async throws -> [VODRef] {
+        let movies = try await data(account.api("get_vod_streams"), p)
+        let m = await Task.detached(priority: .utility) { XtreamParser.vodRefs(movies, kind: .movie) }.value
+        let series = try await data(account.api("get_series"), p)
+        let s = await Task.detached(priority: .utility) { XtreamParser.vodRefs(series, kind: .series) }.value
+        return m + s
     }
 
     private static func load(_ source: String, _ p: IPTVPlaylist) async throws -> String {
@@ -388,7 +456,9 @@ final class IPTVStore: ObservableObject {
         }
         var lines = ["type\tgroupe\tnom"]
         for c in rawChannels { lines.append("direct\t\(clean(c.group))\t\(clean(c.name))") }
-        for v in vod { lines.append("\(v.kind == .series ? "serie" : "film")\t\(clean(v.category))\t\(clean(v.name))") }
+        for v in vodLookup.refs where v.episode == nil || v.episode == 1 {
+            lines.append("\(v.kind == .series ? "serie" : "film")\t\t\(clean(v.name))")
+        }
         let dir = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
         let url = dir.appendingPathComponent("Strapontin-noms-des-chaines.tsv")
         guard (try? lines.joined(separator: "\n").write(to: url, atomically: true, encoding: .utf8)) != nil else { return nil }
@@ -459,39 +529,61 @@ final class IPTVStore: ObservableObject {
         saveState()
     }
 
-    // MARK: séries Xtream
+    // MARK: films et séries
 
-    func loadEpisodes(_ item: VODItem) async {
-        guard episodes[item.id] == nil, let sid = item.seriesId,
-              let p = playlists.first(where: { XtreamAccount.from(playlistURL: $0.source) != nil }),
-              let account = XtreamAccount.from(playlistURL: p.source),
-              let d = try? await Self.data(account.api("get_series_info", ["series_id": String(sid)]), p) else { return }
-        episodes[item.id] = XtreamParser.episodes(d, account: account)
+    /// Titres IPTV montrés dans la recherche : retrouvés par leur identifiant pour leur page.
+    private var shownRefs: [String: VODRef] = [:]
+    func remember(_ r: VODRef) { shownRefs[r.id] = r }
+    func remembered(_ id: String) -> VODRef? { shownRefs[id] ?? vodLookup.refs.first { $0.id == id } }
+
+    /// Adresse de lecture d'un film (ou d'un épisode de playlist sans API).
+    func url(of r: VODRef) -> String? {
+        if let u = r.url { return u }
+        guard r.kind == .movie, let id = r.stream, let account = xtreamAccount else { return nil }
+        return account.movieURL(id, ext: r.ext ?? "mp4")
     }
 
-    /// Séries de la playlist sans API : épisodes regroupés d'après les noms (« The Bear S01 E02 »).
-    func playlistEpisodes(of item: VODItem) -> [VODEpisode] {
-        let base = CatalogFold.fold(VODTitle.clean(item.name.replacingOccurrences(of: #"(?i)\s*s\d{1,2}\s?e\d{1,3}.*$"#, with: "", options: .regularExpression)))
-        return vod.filter { $0.kind == .series && $0.url != nil }.compactMap { v -> VODEpisode? in
-            let name = v.name
-            guard let r = name.range(of: #"(?i)s(\d{1,2})\s?e(\d{1,3})"#, options: .regularExpression) else { return nil }
-            let head = CatalogFold.fold(VODTitle.clean(String(name[..<r.lowerBound])))
-            guard head == base else { return nil }
-            let tag = name[r].lowercased()
-            let nums = tag.split(whereSeparator: { !$0.isNumber }).compactMap { Int($0) }
-            guard nums.count == 2, let url = v.url else { return nil }
-            return VODEpisode(id: v.id, season: nums[0], episode: nums[1], title: "Épisode \(nums[1])", plot: nil, still: nil,
-                              duration: nil, url: url)
-        }.sorted { ($0.season, $0.episode) < ($1.season, $1.episode) }
+    private var xtreamAccount: XtreamAccount? { playlists.lazy.compactMap { XtreamAccount.from(playlistURL: $0.source) }.first }
+    private var xtreamPlaylist: IPTVPlaylist? { playlists.first { XtreamAccount.from(playlistURL: $0.source) != nil } }
+
+    /// Épisodes d'une série : get_series_info à l'ouverture (Xtream), sinon les lignes de la playlist.
+    func loadEpisodes(_ r: VODRef) async {
+        guard episodes[r.id] == nil else { return }
+        if let sid = r.stream, r.kind == .series, let p = xtreamPlaylist, let account = xtreamAccount,
+           let d = try? await Self.data(account.api("get_series_info", ["series_id": String(sid)]), p) {
+            episodes[r.id] = XtreamParser.episodes(d, account: account)
+            return
+        }
+        episodes[r.id] = vodLookup.episodes(of: r).compactMap { e in
+            guard let u = e.url, let s = e.season, let n = e.episode else { return nil }
+            return VODEpisode(id: e.id, season: s, episode: n, title: "Épisode \(n)", plot: nil, still: nil, duration: nil, url: u)
+        }
     }
 
-    /// Le catalogue d'une playlist sans API : une série n'apparaît qu'une fois (pas une carte par épisode).
-    var catalogItems: [VODItem] {
-        var seen = Set<String>()
-        return vod.filter { v in
-            guard v.kind == .series, v.seriesId == nil else { return true }
-            let base = CatalogFold.fold(VODTitle.clean(v.name.replacingOccurrences(of: #"(?i)\s*s\d{1,2}\s?e\d{1,3}.*$"#, with: "", options: .regularExpression)))
-            return seen.insert(base).inserted
+    // MARK: programme court (Xtream)
+
+    /// Ce qui passe maintenant et ensuite : guide XMLTV s'il y en a un, sinon le programme court demandé au serveur.
+    func nowNext(_ e: IPTVEntry) -> (now: ProgramGuide.Program?, next: ProgramGuide.Program?) {
+        let g = guide.nowNext(e.tvgId)
+        if g.now != nil || g.next != nil { return g }
+        guard let list = shortEPG[e.id] else { return (nil, nil) }
+        let now = Date()
+        let i = list.firstIndex { $0.start <= now && now < $0.stop }
+        return (i.map { list[$0] }, list.first { $0.start > now })
+    }
+
+    private var epgAsked: [String: Date] = [:]
+
+    /// Programme court d'une chaîne affichée (en tête d'« En direct », dans le lecteur) : une requête, gardée 15 min.
+    func loadShortEPG(_ e: IPTVEntry) async {
+        guard guide.nowNext(e.tvgId).now == nil, let account = xtreamAccount, let p = xtreamPlaylist,
+              Date().timeIntervalSince(epgAsked[e.id] ?? .distantPast) > 900 else { return }
+        let raw = variants(of: e).first?.id ?? e.id
+        guard let slash = raw.lastIndex(of: "/"), raw[raw.index(after: slash)...].first == "x",
+              let sid = Int(raw[raw.index(raw.index(after: slash), offsetBy: 1)...]) else { return }
+        epgAsked[e.id] = Date()
+        if let d = try? await Self.data(account.api("get_short_epg", ["stream_id": String(sid), "limit": "4"]), p) {
+            shortEPG[e.id] = XtreamParser.shortEPG(d)
         }
     }
 }

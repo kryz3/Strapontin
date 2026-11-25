@@ -420,3 +420,93 @@ final class VODMatchTests: XCTestCase {
                                      originalTitles: [8: "The City of Fear"])?.id, 8)
     }
 }
+
+final class VODLookupTests: XCTestCase {
+    func testFastKeyStripsProviderNoise() {
+        XCTAssertEqual(VODMatch.fastKey("FR | Dune (2021) [MULTI] 4K").key, "dune")
+        XCTAssertEqual(VODMatch.fastKey("FR | Dune (2021) [MULTI] 4K").year, 2021)
+        XCTAssertEqual(VODMatch.fastKey("1917 (2019)").key, "1917")
+        XCTAssertEqual(VODMatch.fastKey("1917 (2019)").year, 2019)
+        XCTAssertEqual(VODMatch.fastKey("2012").key, "2012")
+        XCTAssertNil(VODMatch.fastKey("2012").year)
+        XCTAssertEqual(VODMatch.fastKey("|EN| The Bear S01 E02").key, "bear")
+        XCTAssertEqual(VODMatch.fastKey("Fast & Furious 5 - 2011 VOSTFR").key, "fast et furious 5")
+        XCTAssertEqual(VODMatch.fastKey("✦ Rocky II ✦").key, "rocky 2")
+        XCTAssertEqual(VODMatch.episode("The Bear S01 E02")?.episode, 2)
+        XCTAssertEqual(VODMatch.episode("FR| Lupin S02E10 VF")?.season, 2)
+        XCTAssertNil(VODMatch.episode("Seven Samurai"))
+    }
+
+    func testFindFromATMDbFiche() {
+        let l = VODLookup([
+            VODRef(id: "1", kind: .movie, name: "FR | Dune (2021) 4K"),
+            VODRef(id: "2", kind: .movie, name: "|EN| Dune - 2021 VOSTFR"),
+            VODRef(id: "3", kind: .movie, name: "Dune (1984)"),
+            VODRef(id: "4", kind: .movie, name: "La Cité de la peur", tmdb: 8),
+            VODRef(id: "5", kind: .series, name: "Dune: Prophecy"),
+        ])
+        XCTAssertEqual(Set(l.find(kind: .movie, tmdbId: 438631, titles: ["Dune"], year: 2021).map(\.id)), ["1", "2"])
+        XCTAssertEqual(l.find(kind: .movie, tmdbId: 841, titles: ["Dune"], year: 1984).map(\.id), ["3"])
+        XCTAssertEqual(l.find(kind: .movie, tmdbId: 8, titles: ["The City of Fear"], year: 1994).map(\.id), ["4"])
+        XCTAssertTrue(l.find(kind: .series, tmdbId: nil, titles: ["Dune"], year: 2021).isEmpty)
+        XCTAssertEqual(l.search("dune").count, 3)
+    }
+}
+
+/// Cas relevés dans une vraie liste de 28 000 chaînes (noms seulement) : groupes « CONTINENT | PAYS THÈME »,
+/// préfixes de nom, intertitres décoratifs, Canal+ de plusieurs pays.
+final class RealListCasesTests: XCTestCase {
+    let rows: [(String, String)] = [
+        ("EU | FRANCE GENERALE ", "FR| CANAL+ FHD"), ("EU | FRANCE GENERALE ", "FR| CANAL+ UHD"),
+        ("EU | FRANCE GENERALE ", "FR| CANAL+ FHD [BK]"), ("EU | FRANCE GENERALE ", "FR| CANAL+ CINEMA FHD"),
+        ("EU | FRANCE CANAL+ SPORTS", "FR| CANAL+ LIVE 1 FHD"), ("EU | FRANCE CANAL+ SPORTS", "FR| CANAL+ LIVE 19 HD"),
+        ("EU | FRANCE CANAL+ SPORTS", "FR| CANAL+ SPORT FHD"),
+        ("EU | FRANCE GENERALE ", "FR| TF1 UHD"), ("EU | FRANCE GENERALE ", "FR| TF1 HEVC"), ("EU | FRANCE GENERALE ", "FR| TF1 SD"),
+        ("EU | FRANCE GENERALE ", "FR| TF1 +1 FHD"), ("EU | FRANCE GENERALE ", "FR| FRANCE 2 FHD"), ("EU | FRANCE GENERALE ", "FR| M6 HD"),
+        ("EU | FRANCE INFORMATION", "FR| BFM TV FHD"), ("EU | FRANCE SPORTS ", "FR| BEIN SPORTS 1 FHD"),
+        ("AF | AFRICA CANAL+ SPORT", "AF| CANAL+ SPORT 1 HD"), ("AF | AFRICA CANAL +", "AF| TF1 HD"),
+        ("AF | AFRICA CANAL +", "✦●✦C+ AFRICA GENERAL✦●✦"), ("EU | FRANCE GENERALE ", "✦●✦| CANAL+ FRANCE |✦●✦"),
+        ("VIP | UEFA PPV", "UEFA-PL| CANAL+ SPORT 1 HD"), ("EU | UK GENERAL", "UK| BBC ONE FHD"),
+        ("AM | USA NBC", "US| NBC 4 NEW YORK"), ("EU | SWEDEN SVENSK HOCKEY SPORTS", "SW| TV4 HOCKEY"),
+        ("24/7 | ARABE", "24/7-AR| BAB AL HARA"), ("Accout Information", "Exp: 2026-12-31"),
+    ]
+
+    var grouped: ChannelGrouping.Result {
+        ChannelGrouping.group(rows.enumerated().map { i, r in
+            IPTVEntry(id: "\(i)", name: r.1, url: "u\(i)", tvgId: nil, logo: nil, group: r.0, number: nil, kind: .live, playlist: "p",
+                      country: IPTVCountry.detect(group: r.0, name: r.1))
+        })
+    }
+
+    func testFranceHasItsChannelsAndNotAfrica() {
+        let g = grouped
+        let fr = Set(g.channels.filter { $0.country == "FR" }.map(\.name))
+        for n in ["Canal+", "Canal+ Cinéma", "Canal+ Live 1", "Canal+ Live 19", "Canal+ Sport", "TF1", "France 2", "M6", "BFM TV", "beIN Sports 1"] {
+            XCTAssertTrue(fr.contains(n), n)
+        }
+        let africa = g.channels.filter { $0.country == "AFR" }.map(\.name)
+        XCTAssertTrue(africa.contains("Canal+ Sport 1"))
+        XCTAssertTrue(africa.contains("TF1"))                             // TF1 Afrique : pas fondu avec TF1 France
+        XCTAssertEqual(g.channels.first { $0.name == "Canal+ Sport 1" && $0.country == "PL" }?.country, "PL")
+    }
+
+    func testVariantsDecorationsAndAccountLines() {
+        let g = grouped
+        let canal = g.channels.first { $0.name == "Canal+" && $0.country == "FR" }!
+        XCTAssertEqual(g.variants[canal.id]?.map(\.label), ["4K", "Full HD", "Full HD · secours"])
+        let tf1 = g.channels.first { $0.name == "TF1" && $0.country == "FR" }!
+        XCTAssertEqual(g.variants[tf1.id]?.map(\.quality), [ChannelName.Quality.uhd, .unknown, .sd])   // 4K, HEVC, SD
+        XCTAssertFalse(g.channels.contains { $0.name.contains("✦") || $0.name.contains("AFRICA GENERAL") })   // intertitres
+        XCTAssertFalse(g.channels.contains { $0.name.contains("Exp") })                                       // infos du compte
+        XCTAssertEqual(g.channels.first { $0.name == "BBC One" }?.country, "GB")
+        XCTAssertEqual(g.channels.first { $0.name.hasPrefix("NBC") }?.country, "US")
+        XCTAssertEqual(g.channels.first { $0.name.hasPrefix("TV4") }?.country, "SE")
+        XCTAssertEqual(g.channels.first { $0.name.hasPrefix("Bab") }?.country, "ARAB")
+    }
+
+    func testGroupTitlesDropContinentAndCountry() {
+        XCTAssertEqual(IPTVCountry.groupTitle("EU | FRANCE GENERALE "), "GENERALE")
+        XCTAssertEqual(IPTVCountry.groupTitle("EU | FRANCE CANAL+ SPORTS"), "CANAL+ SPORTS")
+        XCTAssertEqual(IPTVCountry.groupTitle("AM | USA NBC"), "NBC")
+    }
+}
