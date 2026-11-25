@@ -27,6 +27,8 @@ final class MPVPlayer {
     var onDuration: ((Double) -> Void)?
     var onPause: ((Bool) -> Void)?
     var onEndOfFile: (() -> Void)?
+    /// (erreur, fin normale) : MPV_EVENT_END_FILE.
+    var onEndFile: ((Bool, Bool) -> Void)?
     var onFileLoaded: (() -> Void)?
     var onLeftEndOfFile: (() -> Void)?
     var onFullscreen: ((Bool) -> Void)?
@@ -110,6 +112,11 @@ final class MPVPlayer {
             }
             if id == MPV_EVENT_FILE_LOADED {
                 DispatchQueue.main.async { self.onFileLoaded?() }
+            } else if id == MPV_EVENT_END_FILE, let data = ev.pointee.data {
+                // fin d'un fichier ou d'un flux : erreur (réseau, HTTP…) ou fin normale
+                let end = data.assumingMemoryBound(to: mpv_event_end_file.self).pointee
+                let error = end.reason == MPV_END_FILE_REASON_ERROR, eof = end.reason == MPV_END_FILE_REASON_EOF
+                DispatchQueue.main.async { self.onEndFile?(error, eof) }
             } else if id == MPV_EVENT_VIDEO_RECONFIG {
                 DispatchQueue.main.async { self.onVideoReconfig?() }
             } else if id == MPV_EVENT_CLIENT_MESSAGE, let data = ev.pointee.data {

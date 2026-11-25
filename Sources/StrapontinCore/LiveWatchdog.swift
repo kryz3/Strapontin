@@ -33,6 +33,8 @@ public struct LiveWatchdog: Equatable, Sendable {
     /// Tolérances : figé au-delà de `stallAfter` s sans progression ; démarrage toléré `startupGrace` s.
     public var stallAfter = 5.0
     public var startupGrace = 15.0
+    /// Après une réparation, le flux répondait il y a peu : on attend moins longtemps avant l'essai suivant.
+    public var reopenGrace = 8.0
     public var maxAttempts = 10
     /// Délais avant chaque essai successif.
     public var backoff: [Double] = [0, 1, 2, 4, 8, 15, 30]
@@ -40,6 +42,7 @@ public struct LiveWatchdog: Equatable, Sendable {
     public var hasAlternate = false
 
     private(set) var startedAt: Double?
+    private(set) var grace = 15.0
     private(set) var lastPosition: Double?
     private(set) var lastProgressAt: Double?
     private(set) var attempts = 0
@@ -53,6 +56,7 @@ public struct LiveWatchdog: Equatable, Sendable {
 
     /// Nouvelle ouverture du flux (au lancement ou après une réparation) : délai de démarrage à nouveau.
     public mutating func opened(at t: Double) {
+        grace = incidentAt == nil ? startupGrace : reopenGrace
         startedAt = t
         lastPosition = nil
         lastProgressAt = nil
@@ -72,7 +76,8 @@ public struct LiveWatchdog: Equatable, Sendable {
             return nil
         }
         if lastPosition == nil, let p = o.position { lastPosition = p; lastProgressAt = o.time }
-        if o.userPaused { lastProgressAt = o.time; return nil }   // pause voulue : rien à réparer
+        // pause voulue : rien à réparer (une erreur ou une fin de flux passe avant : le lecteur se met en pause tout seul)
+        if o.userPaused, !o.failed, !o.ended { lastProgressAt = o.time; return nil }
 
         let broken: Bool
         if o.failed || o.ended {
@@ -80,7 +85,7 @@ public struct LiveWatchdog: Equatable, Sendable {
         } else if let since = lastProgressAt {
             broken = o.time - since > stallAfter
         } else {
-            broken = o.time - (startedAt ?? o.time) > startupGrace   // n'a jamais démarré
+            broken = o.time - (startedAt ?? o.time) > grace   // n'a jamais démarré
         }
         guard broken else { return nil }
         if incidentAt == nil { incidentAt = o.time; nextAttemptAt = o.time }
@@ -90,14 +95,14 @@ public struct LiveWatchdog: Equatable, Sendable {
         let step = attempts
         attempts += 1
         nextAttemptAt = o.time + backoff[min(step + 1, backoff.count - 1)]
-        // l'échelle : recaler au bord du direct (seulement pour un figeage avec des données en réserve),
-        // rouvrir, débit plus bas, autre adresse, puis rouvrir encore en espaçant les essais
+        // l'échelle : recaler au bord du direct (seulement pour un figeage avec des données en réserve), rouvrir,
+        // puis l'autre adresse de la chaîne dès le 2e essai s'il y en a une, débit plus bas, et on alterne en espaçant
         switch step {
         case 0 where !o.failed && !o.ended && (o.cacheSeconds ?? 0) > 1: return .seekToLive
-        case 0, 1: return .reload
-        case 2 where hasLowerBitrate: return .lowerBitrate
-        case 2, 3: return hasAlternate ? .alternateSource : .reload
-        default: return .reload
+        case 0: return .reload
+        case 1: return hasAlternate ? .alternateSource : (hasLowerBitrate ? .lowerBitrate : .reload)
+        case 2 where hasLowerBitrate && hasAlternate: return .lowerBitrate
+        default: return hasAlternate && step % 2 == 1 ? .alternateSource : .reload
         }
     }
 

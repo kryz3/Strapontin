@@ -138,6 +138,7 @@ struct SearchPage: View {
                         .foregroundStyle(.secondary).padding(.horizontal, Theme.margin)
                 } else {
                     libraryResults
+                    ChannelSearchSection(query: query)
                     TMDbSearchSections(query: query)
                 }
             }
@@ -980,5 +981,26 @@ struct MissingTMDbKey: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: compact ? .leading : .center)
+    }
+}
+
+/// Recherche unifiée : les chaînes et le catalogue IPTV qui correspondent (instantané, hors du fil principal).
+struct ChannelSearchSection: View {
+    let query: String
+    @ObservedObject private var store = IPTVStore.shared
+    @State private var channels: [IPTVEntry] = []
+
+    var body: some View {
+        Group {
+            if !channels.isEmpty {
+                Shelf(title: "Chaînes") { ForEach(channels) { ChannelCard(channel: $0) } }
+            }
+        }
+        .task(id: query) {
+            guard store.configured else { channels = []; return }
+            let q = query, index = store.channelIndex
+            let found = await Task.detached(priority: .userInitiated) { index.search(q, kinds: [.live], limit: 20) }.value
+            if !Task.isCancelled { channels = found }
+        }
     }
 }

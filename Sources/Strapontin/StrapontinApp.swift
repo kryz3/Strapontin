@@ -54,6 +54,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Task { @MainActor in
             AppUpdater.shared.start()
             Notifier.shared.start()
+            IPTVStore.shared.start()
             LibraryStore.shared.start()
             DownloadsModel.shared.start()
             TrackerModel.shared.start()
@@ -109,6 +110,8 @@ struct StrapontinApp: App {
                 Button("Séries") { GoTo.open(TopTab.shows.rawValue) }.keyboardShortcut("3", modifiers: .command)
                 Button("Pour toi") { GoTo.open(TopTab.forYou.rawValue) }.keyboardShortcut("4", modifiers: .command)
                 Button("Découvrir") { GoTo.open(TopTab.discover.rawValue) }.keyboardShortcut("5", modifiers: .command)
+                Button("En direct") { GoTo.open(TopTab.live.rawValue) }.keyboardShortcut("6", modifiers: .command)
+                Button("Catalogue IPTV") { GoTo.open(TopTab.iptvCatalog.rawValue) }.keyboardShortcut("7", modifiers: .command)
                 Button("Recherche") { GoTo.open(TopTab.search.rawValue) }
                 Divider()
                 Button("Historique") { GoTo.open("history") }.keyboardShortcut("y", modifiers: .command)

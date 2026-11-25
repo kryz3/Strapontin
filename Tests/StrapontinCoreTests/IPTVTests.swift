@@ -98,7 +98,7 @@ final class IPTVTests: XCTestCase {
         _ = run(&w, from: 0, to: 10, position: { $0 })
         // figé à 10 s, avec des données en réserve
         let actions = run(&w, from: 10.5, to: 40, position: { _ in 10 }, cache: 3)
-        XCTAssertEqual(actions.map(\.1).prefix(4), [.seekToLive, .reload, .alternateSource, .alternateSource])
+        XCTAssertEqual(actions.map(\.1).prefix(4), [.seekToLive, .alternateSource, .reload, .alternateSource])
         XCTAssertEqual(actions.first!.0, 15.5, accuracy: 0.6)                // après 5 s sans progression
         XCTAssertGreaterThanOrEqual(actions[2].0 - actions[1].0, 2)          // les essais s'espacent
         XCTAssertTrue(w.isRecovering)
@@ -124,6 +124,18 @@ final class IPTVTests: XCTestCase {
         XCTAssertEqual(actions.last?.1, .giveUp)
     }
 
+    func testEndOfStreamWhilePausedIsRepaired() {
+        // le lecteur se met en pause tout seul au bout du flux (erreur 503 sur la liste) : ce n'est pas une pause voulue
+        var w = LiveWatchdog()
+        _ = run(&w, from: 0, to: 10, position: { $0 })
+        XCTAssertEqual(w.observe(.init(time: 10.5, position: 10, userPaused: false, ended: true)), .reload)
+        w.opened(at: 10.5)
+        var t = 11.0, next: LiveWatchdog.Action?
+        while t < 30, next == nil { next = w.observe(.init(time: t, position: nil, failed: true)); t += 0.5 }
+        XCTAssertEqual(next, .reload)
+        XCTAssertLessThan(t, 13)                                              // pas d'attente de démarrage après une erreur
+    }
+
     func testUserPauseIsNotAFreeze() {
         var w = LiveWatchdog()
         _ = run(&w, from: 0, to: 10, position: { $0 })
@@ -136,5 +148,36 @@ final class IPTVTests: XCTestCase {
         XCTAssertTrue(o["stream-lavf-o"]!.contains("reconnect_streamed=1"))
         XCTAssertEqual(o["user-agent"], "UA")
         XCTAssertEqual(o["referrer"], "https://r.exemple/")
+    }
+}
+
+/// Catalogue à la demande : comptes Xtream, réponses de l'API, titres bruités.
+final class XtreamTests: XCTestCase {
+    func testAccountFromPlaylistURL() {
+        let a = XtreamAccount.from(playlistURL: "http://srv.exemple:8080/get.php?username=u1&password=p1&type=m3u_plus&output=ts")
+        XCTAssertEqual(a, XtreamAccount(base: "http://srv.exemple:8080", username: "u1", password: "p1"))
+        XCTAssertNil(XtreamAccount.from(playlistURL: "https://exemple/liste.m3u"))
+        XCTAssertEqual(a?.movieURL(12, ext: "mkv"), "http://srv.exemple:8080/movie/u1/p1/12.mkv")
+    }
+
+    func testParsesMoviesSeriesAndEpisodes() {
+        let account = XtreamAccount(base: "http://s", username: "u", password: "p")
+        let cats = XtreamParser.categories(Data(#"[{"category_id":"3","category_name":"Films FR"}]"#.utf8))
+        let movies = XtreamParser.movies(Data(#"[{"stream_id":12,"name":"FR | Dune (2021) [MULTI]","stream_icon":"http://i/d.jpg","category_id":"3","container_extension":"mkv","rating":"7.8","tmdb":"438631"}]"#.utf8),
+                                         account: account, categories: cats)
+        XCTAssertEqual(movies.first?.category, "Films FR")
+        XCTAssertEqual(movies.first?.tmdbId, 438631)
+        XCTAssertEqual(movies.first?.url, "http://s/movie/u/p/12.mkv")
+        XCTAssertEqual(movies.first?.year, 2021)
+        let eps = XtreamParser.episodes(Data(#"{"episodes":{"2":[{"id":"900","episode_num":3,"title":"Trois","container_extension":"mp4","info":{"plot":"…"}}],"1":[{"id":"800","episode_num":1,"title":"Un"}]}}"#.utf8),
+                                        account: account)
+        XCTAssertEqual(eps.map(\.title), ["Un", "Trois"])
+        XCTAssertEqual(eps.last?.url, "http://s/series/u/p/900.mp4")
+    }
+
+    func testCleansNoisyTitles() {
+        XCTAssertEqual(VODTitle.clean("FR | Dune (2021) [MULTI] 4K"), "Dune")
+        XCTAssertEqual(VODTitle.clean("|VF| Le Comte de Monte-Cristo - 2024"), "Le Comte de Monte-Cristo")
+        XCTAssertEqual(VODTitle.year("Oppenheimer (2023) HD"), 2023)
     }
 }

@@ -40,6 +40,7 @@ public enum M3UParser {
         var groupOverride: String?
         var seen: [String: Int] = [:]
         var autoNumber = 0
+        var explicit = Set<String>()
 
         text.enumerateLines { raw, _ in
             let line = raw.trimmingCharacters(in: .whitespaces)
@@ -66,11 +67,16 @@ public enum M3UParser {
                 var id = (a["tvg-id"].flatMap { $0.isEmpty ? nil : $0 } ?? "\(group)|\(name)").lowercased()
                 // même tvg-id pour plusieurs entrées (qualités, sources de secours) : identifiants distincts
                 if let n = seen[id] { seen[id] = n + 1; id += "#\(n + 1)" } else { seen[id] = 1 }
+                if a["tvg-chno"] != nil || a["channel-number"] != nil { explicit.insert(playlist + "/" + id) }
                 entries.append(IPTVEntry(id: playlist + "/" + id, name: name, url: line, tvgId: a["tvg-id"],
                                          logo: a["tvg-logo"].flatMap { $0.isEmpty ? nil : $0 }, group: group,
                                          number: number, kind: kind, playlist: playlist))
                 pending = nil
             }
+        }
+        // numéros : ceux de la playlist s'il y en a ; sinon l'ordre des chaînes (1, 2, 3…)
+        if entries.contains(where: { $0.kind == .live && $0.number != nil && explicit.contains($0.id) }) {
+            for i in entries.indices where !explicit.contains(entries[i].id) { entries[i].number = nil }
         }
         return Result(entries: entries, guideURL: guide)
     }

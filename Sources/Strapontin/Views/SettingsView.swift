@@ -3,7 +3,7 @@ import SwiftUI
 
 /// Onglets des réglages : un lien « Brancher un indexeur » ouvre directement le bon.
 enum SettingsTab: String {
-    case library, metadata, playback, downloads, indexer
+    case library, metadata, playback, downloads, indexer, iptv
     static let key = "settingsTab"
 }
 
@@ -26,6 +26,7 @@ struct SettingsView: View {
             PlaybackSettings().tabItem { Label("Lecture", systemImage: "play.rectangle") }.tag(SettingsTab.playback.rawValue)
             QbitSettings().tabItem { Label("Téléchargements", systemImage: "arrow.down.circle") }.tag(SettingsTab.downloads.rawValue)
             TrackerSettings().tabItem { Label("Indexeur", systemImage: "antenna.radiowaves.left.and.right") }.tag(SettingsTab.indexer.rawValue)
+            IPTVSettings().tabItem { Label("IPTV", systemImage: "tv.and.mediabox") }.tag(SettingsTab.iptv.rawValue)
         }
         .frame(width: 560, height: 600)
     }

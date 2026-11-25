@@ -7,6 +7,30 @@ struct PlayItem: Hashable {
     var title: String
     var subtitle: String?
     var start: Double
+    /// Chaîne en direct (IPTV) : options de flux, sources de secours, guide.
+    var live: LiveInfo? = nil
+    /// Film ou épisode à la demande (IPTV) : clé de reprise de lecture.
+    var progressKey: String? = nil
+}
+
+struct LiveInfo: Hashable {
+    var entry: IPTVEntry
+    var alternates: [String]
+    var userAgent: String
+    var referer: String
+}
+
+/// Ce que montrent les contrôles pour une chaîne en direct.
+struct LiveDisplay: Equatable {
+    var name: String
+    var logo: String?
+    var number: Int?
+    var group: String
+    var now: ProgramGuide.Program?
+    var next: ProgramGuide.Program?
+    var favorite: Bool
+    var reconnecting = false
+    var failed = false
 }
 
 extension PlayItem {
@@ -36,6 +60,10 @@ final class PlayerModel: ObservableObject {
     @Published var episodesOpen = false
     /// Mini-lecteur (petite fenêtre flottante) : contrôles réduits.
     @Published var mini = false
+    /// Chaîne en direct (nil pour un film ou un épisode).
+    @Published var live: LiveDisplay?
+    /// Saisie d'un numéro de chaîne en cours (« 1 », « 12 »…).
+    @Published var typedNumber: String?
     @Published var audioTracks: [Track] = []
     @Published var subTracks: [Track] = []
     @Published var info: String?
@@ -68,10 +96,10 @@ final class PlayerController: NSObject, NSWindowDelegate {
     private let overlay = PlayerContainerView()
     private(set) var window: NSWindow?
     private var ownsWindow = false
-    private var queue: [PlayItem]
-    private var index = 0
+    var queue: [PlayItem]
+    var index = 0
     private var finishedCurrent = false
-    private var closing = false
+    var closing = false
     private var idleTimer: Timer?
     private var saveTimer: Timer?
     private var mouseMonitor: Any?
@@ -80,7 +108,7 @@ final class PlayerController: NSObject, NSWindowDelegate {
     private let windowSize: NSSize
 
     /// Le fichier en cours est ouvert : sa position et sa durée sont les siennes, pas celles du précédent.
-    private var loaded = false
+    var loaded = false
     private var changing = false
     private(set) var markers = PlaybackMarkers()
     private var endCard = EndCard()
@@ -99,6 +127,16 @@ final class PlayerController: NSObject, NSWindowDelegate {
     private var decoded: (slot: Int, image: NSImage)?
     /// Cadre d'avant le mini-lecteur.
     private var miniRestore: NSRect?
+    // direct
+    var watchdog = LiveWatchdog()
+    var liveEnded = false
+    var liveFailedFlag = false
+    /// Le direct est arrivé au bout de ce qu'il avait (le lecteur s'est mis en pause tout seul) : à réparer.
+    var liveAtEnd = false
+    var liveURL = ""
+    var alternateIndex = 0
+    var previousChannel: IPTVEntry?
+    var numberTimer: Timer?
 
     static func play(_ items: [PlayItem]) {
         current?.close()
@@ -170,6 +208,10 @@ final class PlayerController: NSObject, NSWindowDelegate {
             self?.publishNowPlaying()
         }
         player.onEndOfFile = { [weak self] in self?.endOfFile() }
+        player.onEndFile = { [weak self] error, eof in
+            guard let self, self.isLive else { return }
+            if error { self.liveFailedFlag = true } else if eof { self.liveEnded = true }
+        }
         player.onLeftEndOfFile = { [weak self] in
             guard let self, self.endCard.ended else { return }
             self.endCard.leftEnd()
@@ -279,7 +321,7 @@ final class PlayerController: NSObject, NSWindowDelegate {
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    private func loadCurrent() {
+    func loadCurrent() {
         let item = queue[index]
         finishedCurrent = false
         loaded = false
@@ -308,6 +350,7 @@ final class PlayerController: NSObject, NSWindowDelegate {
             player.set("aid", "auto")
             player.set("sid", "auto")
         }
+        prepareStream(item)
         player.load(item.path, start: item.start)
         NowPlaying.shared.attach(self)
         publishNowPlaying()
@@ -422,6 +465,7 @@ final class PlayerController: NSObject, NSWindowDelegate {
 
     /// Deux fois par seconde : un épisode qui arrive, une analyse qui finit, sont vus en cours de lecture.
     private func refresh() {
+        if isLive { liveTick(); return }
         guard loaded, !closing, !changing else { return }
         let file = currentFile
         let episodic = file?.episode != nil
@@ -559,11 +603,17 @@ final class PlayerController: NSObject, NSWindowDelegate {
 
     private func saveProgress(finished: Bool = false) {
         guard !finishedCurrent, index < queue.count, model.position > 0 || finished else { return }
+        if queue[index].live != nil { return }
+        if let key = queue[index].progressKey {
+            IPTVStore.shared.saveProgress(key, position: finished ? model.duration : model.position, duration: model.duration)
+            return
+        }
         LibraryStore.shared.saveProgress(path: queue[index].path, position: model.position, duration: model.duration,
                                          finished: finished || endCard.ended, creditsStart: creditsSpan?.start)
     }
 
     private func endOfFile() {
+        if isLive { liveEnded = true; liveAtEnd = true; return }   // un direct ne finit pas : la surveillance s'en occupe
         guard !finishedCurrent, loaded, !changing else { return }
         upcoming = findUpcoming(after: currentFile)
         saveProgress(finished: true)
@@ -781,6 +831,9 @@ final class PlayerContainerView: NSView {
         case 49: c.togglePause()                                  // espace
         case 123: c.seek(by: e.modifierFlags.contains(.shift) ? -60 : -5)   // ←
         case 124: c.seek(by: e.modifierFlags.contains(.shift) ? 60 : 5)     // →
+        case 125 where c.isLive: c.zap(1)                         // direct : ↓ chaîne suivante
+        case 126 where c.isLive: c.zap(-1)                        // ↑ chaîne précédente
+        case 51 where c.isLive: c.zapBack()                       // ⌫ : la chaîne d'avant
         case 125: c.setVolume(max(0, c.model.volume - 5))         // ↓
         case 126: c.setVolume(min(150, c.model.volume + 5))       // ↑
         case 53:                                                  // échap : le panneau d'abord, puis le lecteur
@@ -790,6 +843,10 @@ final class PlayerContainerView: NSView {
         default:
             // les raccourcis avec ⌘ (⌘W, ⌘Q…) restent aux menus
             if e.modifierFlags.contains(.command) { return false }
+            if c.isLive, let ch = e.charactersIgnoringModifiers?.first {
+                if ch.isNumber { c.typeDigit(ch); return true }
+                if ch == "*" { c.toggleFavoriteChannel(); return true }
+            }
             switch e.charactersIgnoringModifiers?.lowercased() ?? "" {
             case "f": c.toggleFullScreen()
             case "m": c.toggleMute()
@@ -825,6 +882,8 @@ extension PlayerController {
         case "precedent": playPrevious()
         case "episodes": toggleEpisodes()
         case "mini": toggleMini()
+        case "zap": zap(Int(value) ?? 1)
+        case "reessayer": retryLive()
         case "episode":   // episode=<nom du fichier> : comme un clic dans le panneau
             if let f = LibraryStore.shared.files.first(where: { $0.fileName == p.last }) { playEpisode(f) }
         case "maintenant": playNextNow()
@@ -854,6 +913,7 @@ extension PlayerController {
                               "carte=\(self.model.next.map { "\($0.kind) \($0.title) reste=\($0.secondsLeft.map(String.init) ?? "-") fin=\($0.ended)" } ?? "-")",
                               "pistes=\(chosen.joined(separator: ","))",
                               "precedent=\(self.model.hasPrevious) episodes=\(self.model.episodesOpen)",
+                              "direct=\(self.model.live.map { "\($0.name) reconnexion=\($0.reconnecting) panne=\($0.failed)" } ?? "-")",
                               "mini=\(self.model.mini) fenetre=\(self.window.map { "\(Int($0.frame.width))x\(Int($0.frame.height)) niveau=\($0.level.rawValue)" } ?? "-")")
                         fflush(stdout)
                     }

@@ -7,6 +7,7 @@ enum TopTab: String, Hashable, CaseIterable, Identifiable {
     // ni Bibliothèque (doublon de Films + Séries : ses filtres et tris sont dans « Tous les films » / « Toutes les
     // séries ») ; les téléchargements sont sur les affiches, et dans leur onglet tant qu'il y en a en cours
     case search = "Recherche", home = "Accueil", movies = "Films", shows = "Séries", forYou = "Pour toi", discover = "Découvrir"
+    case live = "En direct", iptvCatalog = "Catalogue IPTV"
     case downloads = "En téléchargement"
     var id: String { rawValue }
 }
@@ -119,6 +120,8 @@ struct ContentView: View {
         case .movies: CategoryPage(kind: .movie)
         case .shows: CategoryPage(kind: .tv)
         case .forYou: ForYouView()
+        case .live: LiveTVView()
+        case .iptvCatalog: IPTVCatalogView()
         case .discover: DiscoverView()
         case .downloads: GridPage(title: "En téléchargement", items: [],
                                   downloads: downloads.visibleEntries(store: store).filter { !$0.isDone })
@@ -140,6 +143,8 @@ struct ContentView: View {
             DownloadDetailView(entryId: id)
         } else if id == "tracker" {
             TrackerView()
+        } else if id.hasPrefix("vod:") {
+            VODDetailView(itemId: String(id.dropFirst(4)))
         } else if id == "history" {
             HistoryView()
         } else if id == "storage" {
@@ -154,6 +159,7 @@ struct ContentView: View {
 /// La barre du haut, façon tvOS : loupe, onglets, réglages, dans une pastille translucide.
 private struct TopBar: View {
     @Binding var tab: TopTab
+    @ObservedObject private var iptv = IPTVStore.shared
     let downloading: Int
     let showIndexer: Bool
     let open: (String) -> Void
@@ -163,6 +169,10 @@ private struct TopBar: View {
         HStack(spacing: 2) {
             icon("magnifyingglass", .search, help: "Recherche (⌘F)")
             ForEach([TopTab.home, .movies, .shows, .forYou, .discover]) { item($0) }
+            // IPTV : seulement quand une playlist est configurée
+            if iptv.configured {
+                ForEach([TopTab.live, .iptvCatalog]) { item($0) }
+            }
             if downloading > 0 { item(.downloads, count: downloading) }
             SettingsLink {
                 Image(systemName: "gearshape").font(.system(size: 13, weight: .semibold))

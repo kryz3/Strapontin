@@ -60,7 +60,7 @@ final class EssaiHarness: ObservableObject {
         switch verb {
         case "tab":
             let map: [String: TopTab] = ["home": .home, "movies": .movies, "shows": .shows, "discover": .discover,
-                                         "downloads": .downloads, "search": .search, "foryou": .forYou]
+                                         "downloads": .downloads, "search": .search, "foryou": .forYou, "direct": .live, "catalogue": .iptvCatalog]
             if let t = map[arg] { send(.tab(t)) }
         case "open": send(.open(arg))
         case "back": send(.back)
@@ -117,6 +117,8 @@ final class EssaiHarness: ObservableObject {
             if let r = FeedReaction(rawValue: arg), let first = m.cards.first { m.react(first, r) }
             print("ESSAI pourtoi", m.cards.prefix(8).map { "\($0.title) [\($0.genreIds.first ?? 0)] ← \($0.because ?? "découverte")" }.joined(separator: " | "))
             fflush(stdout)
+        case "chaine":   // chaine:<nom exact> : comme un clic sur la chaîne
+            if let e = IPTVStore.shared.channels.first(where: { $0.name == arg }) { PlayerController.playLive(e) }
         case "qualite":   // qualite:<clé de fiche>|<choix> : comme le menu de la cloche
             let p = arg.split(separator: "|").map(String.init)
             if p.count == 2 { TrackerModel.shared.setQuality(QualityChoice(rawValue: p[1]), for: p[0]) }

@@ -15,6 +15,10 @@ protocol PlayerActions: AnyObject {
     func playEpisode(_ file: MediaFile)
     func toggleEpisodes()
     func toggleMini()
+    func zap(_ delta: Int)
+    func zapBack()
+    func toggleFavoriteChannel()
+    func retryLive()
     func select(_ track: Track?, type: String)
     func toggleInfo()
     func refreshTracks()
@@ -91,6 +95,37 @@ struct PlayerControlsView: View {
                     .transition(.move(edge: .trailing).combined(with: .opacity))
             }
 
+            if let live = model.live, live.reconnecting, !live.failed {
+                Label("Reconnexion…", systemImage: "arrow.triangle.2.circlepath")
+                    .font(.system(size: 12, weight: .semibold)).foregroundStyle(.white)
+                    .padding(.horizontal, 14).padding(.vertical, 8)
+                    .background(.ultraThinMaterial, in: Capsule())
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top).padding(.top, 20)
+                    .transition(.opacity).allowsHitTesting(false)
+            }
+            if let n = model.typedNumber {
+                Text(n).font(.system(size: 54, weight: .bold).monospacedDigit()).foregroundStyle(.white)
+                    .padding(.horizontal, 24).padding(.vertical, 8)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing).padding(30)
+                    .allowsHitTesting(false)
+            }
+            if let live = model.live, live.failed {
+                VStack(spacing: 14) {
+                    Image(systemName: "antenna.radiowaves.left.and.right.slash").font(.system(size: 40, weight: .light))
+                    Text("\(live.name) ne répond pas").font(.system(size: 20, weight: .bold))
+                    Text("Plusieurs reconnexions ont échoué. La chaîne est peut-être coupée chez le fournisseur.")
+                        .font(.system(size: 13)).foregroundStyle(.white.opacity(0.7)).multilineTextAlignment(.center).frame(maxWidth: 360)
+                    HStack(spacing: 12) {
+                        Button("Réessayer", action: actions.retryLive).buttonStyle(GlassCapsule())
+                        Button("Chaîne suivante") { actions.zap(1) }.buttonStyle(GlassCapsule())
+                    }
+                }
+                .foregroundStyle(.white)
+                .padding(30)
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20))
+            }
+
             if let info = model.info {
                 Text(info)
                     .font(.system(size: 12, weight: .medium, design: .monospaced))
@@ -122,7 +157,86 @@ struct PlayerControlsView: View {
         .padding(.top, 14)
     }
 
-    private var bottom: some View {
+    @ViewBuilder private var bottom: some View {
+        if let live = model.live { liveBottom(live) } else { fileBottom }
+    }
+
+    /// Direct : la chaîne, ce qui passe maintenant et ensuite, le zapping.
+    private func liveBottom(_ live: LiveDisplay) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .center, spacing: 14) {
+                if live.logo != nil {
+                    ChannelLogo(logo: live.logo, name: String(live.name.prefix(14)), fontSize: 11).frame(width: 64, height: 40)
+                }
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 8) {
+                        Text("EN DIRECT").font(.system(size: 10, weight: .heavy)).padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(Theme.accent, in: RoundedRectangle(cornerRadius: 4)).foregroundStyle(.white)
+                        if let n = live.number { Text("\(n)").font(.system(size: 12, weight: .bold).monospacedDigit()).foregroundStyle(.white.opacity(0.7)) }
+                        Text(live.group.uppercased()).font(.system(size: 10, weight: .heavy)).kerning(0.6).foregroundStyle(.white.opacity(0.6))
+                    }
+                    Text(live.name).font(.system(size: 24, weight: .bold)).foregroundStyle(.white)
+                }
+            }
+            if let now = live.now {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text(now.title).font(.system(size: 14, weight: .semibold)).lineLimit(1)
+                        Spacer()
+                        Text(now.start.formatted(date: .omitted, time: .shortened) + " – " + now.stop.formatted(date: .omitted, time: .shortened))
+                            .font(.system(size: 12).monospacedDigit()).foregroundStyle(.white.opacity(0.7))
+                    }
+                    ProgressView(value: min(1, max(0, Date().timeIntervalSince(now.start) / now.stop.timeIntervalSince(now.start))))
+                        .tint(Theme.accent)
+                    if let next = live.next {
+                        Text("Ensuite : \(next.title) · \(next.start.formatted(date: .omitted, time: .shortened))")
+                            .font(.system(size: 12)).foregroundStyle(.white.opacity(0.7)).lineLimit(1)
+                    }
+                }
+                .foregroundStyle(.white)
+            }
+            ZStack {
+                HStack(spacing: 30) {
+                    transport("chevron.up", size: 20) { actions.zap(-1) }.help("Chaîne précédente (↑)")
+                    Button(action: actions.togglePause) {
+                        Image(systemName: model.paused ? "play.fill" : "pause.fill").font(.system(size: 30, weight: .bold))
+                    }
+                    .buttonStyle(GlassCircle(size: 64))
+                    transport("chevron.down", size: 20) { actions.zap(1) }.help("Chaîne suivante (↓)")
+                }
+                HStack(spacing: 14) {
+                    Button(action: actions.toggleFavoriteChannel) {
+                        Image(systemName: live.favorite ? "star.fill" : "star").font(.system(size: 14, weight: .bold))
+                            .foregroundStyle(live.favorite ? Color.yellow : Color.white)
+                    }
+                    .buttonStyle(GlassCircle(size: 38))
+                    .help(live.favorite ? "Retirer des favoris (*)" : "Ajouter aux favoris (*)")
+                    Button(action: actions.zapBack) { Image(systemName: "arrow.uturn.backward").font(.system(size: 14, weight: .bold)) }
+                        .buttonStyle(GlassCircle(size: 38)).help("Chaîne d'avant (⌫)")
+                    Spacer()
+                    Button { actions.refreshTracks(); showTracks.toggle() } label: {
+                        Image(systemName: "captions.bubble.fill").font(.system(size: 15, weight: .semibold))
+                    }
+                    .buttonStyle(GlassCircle(size: 38))
+                    .popover(isPresented: $showTracks, arrowEdge: .top) {
+                        TracksPanel(audio: model.audioTracks, subs: model.subTracks) { t, type in actions.select(t, type: type) }
+                    }
+                    VolumeControl(volume: model.volume, set: actions.setVolume, mute: actions.toggleMute)
+                    Button(action: actions.toggleMini) { Image(systemName: "pip.enter").font(.system(size: 14, weight: .bold)) }
+                        .buttonStyle(GlassCircle(size: 38))
+                    Button(action: actions.toggleFullScreen) {
+                        Image(systemName: model.isFullScreen ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
+                            .font(.system(size: 14, weight: .bold))
+                    }
+                    .buttonStyle(GlassCircle(size: 38))
+                }
+            }
+        }
+        .padding(.horizontal, 44)
+        .padding(.bottom, 30)
+    }
+
+    private var fileBottom: some View {
         VStack(alignment: .leading, spacing: 14) {
             if !model.mini {
             VStack(alignment: .leading, spacing: 3) {
