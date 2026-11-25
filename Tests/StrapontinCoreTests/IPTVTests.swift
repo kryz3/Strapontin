@@ -1,0 +1,140 @@
+import XCTest
+@testable import StrapontinCore
+
+/// Playlists M3U, recherche des chaînes, guide XMLTV, surveillance du direct.
+final class IPTVTests: XCTestCase {
+    let playlist = """
+    #EXTM3U url-tvg="https://guide.exemple/epg.xml"
+    #EXTINF:-1 tvg-id="arte.fr" tvg-name="ARTE" tvg-logo="https://logo.exemple/arte.png" group-title="Généralistes" tvg-chno="7",ARTE HD
+    https://live.exemple/arte.m3u8
+    #EXTINF:-1 tvg-id="france5.fr" group-title="Généralistes, info",France 5
+    https://live.exemple/f5.m3u8
+    #EXTVLCOPT:http-user-agent=Truc
+    #EXTINF:-1 tvg-id="arte.fr" group-title="Généralistes",ARTE (secours)
+    https://backup.exemple/arte.m3u8
+    #EXTINF:-1 tvg-name="Dune (2021)" group-title="VOD | Films",Dune (2021)
+    https://srv.exemple/movie/u/p/123.mkv
+    #EXTINF:-1 group-title="Séries TV",The Bear S01 E02
+    https://srv.exemple/series/u/p/456.mp4
+    #EXTINF:0,Sans attributs
+    http://radio.exemple/stream
+    """
+
+    func testParsesAttributesKindsAndNumbers() {
+        let r = M3UParser.parse(playlist, playlist: "p1")
+        XCTAssertEqual(r.guideURL, "https://guide.exemple/epg.xml")
+        XCTAssertEqual(r.entries.count, 6)
+        let arte = r.entries[0]
+        XCTAssertEqual(arte.name, "ARTE HD")
+        XCTAssertEqual(arte.logo, "https://logo.exemple/arte.png")
+        XCTAssertEqual(arte.number, 7)
+        XCTAssertEqual(arte.kind, .live)
+        XCTAssertEqual(r.entries[1].group, "Généralistes, info")          // virgule dans les guillemets
+        XCTAssertNotEqual(r.entries[0].id, r.entries[2].id)                // même tvg-id : deux entrées distinctes
+        XCTAssertEqual(r.entries[3].kind, .movie)
+        XCTAssertEqual(r.entries[4].kind, .series)
+        XCTAssertEqual(r.entries[5].group, "Autres")
+    }
+
+    func testBigPlaylistParsesQuickly() {
+        var text = "#EXTM3U\n"
+        for i in 0..<30_000 { text += "#EXTINF:-1 tvg-id=\"c\(i)\" group-title=\"G\(i % 40)\",Chaîne \(i)\nhttp://x/\(i).ts\n" }
+        let t0 = Date()
+        let r = M3UParser.parse(text)
+        XCTAssertEqual(r.entries.count, 30_000)
+        XCTAssertLessThan(Date().timeIntervalSince(t0), 3)
+        let index = IPTVSearchIndex(r.entries)
+        let t1 = Date()
+        _ = index.search("chaine 2999")
+        XCTAssertLessThan(Date().timeIntervalSince(t1), 0.5)
+    }
+
+    func testSearchToleratesAccentsPrefixesTyposAndNumbers() {
+        let index = IPTVSearchIndex(M3UParser.parse(playlist).entries)
+        XCTAssertEqual(index.search("arte").first?.name, "ARTE HD")
+        XCTAssertEqual(index.search("FRANCE").first?.name, "France 5")
+        XCTAssertEqual(index.search("fra").first?.name, "France 5")          // préfixe
+        XCTAssertEqual(index.search("frnace 5").first?.name, "France 5")     // une faute
+        XCTAssertEqual(index.search("7").first?.name, "ARTE HD")             // numéro de chaîne
+        XCTAssertEqual(index.search("generalistes").count, 3)                // nom du groupe, sans accent
+        XCTAssertEqual(index.search("dune", kinds: [.movie]).first?.kind, .movie)
+    }
+
+    func testXMLTVNowAndNext() {
+        let xml = """
+        <tv><programme start="20261125200000 +0000" stop="20261125210000 +0000" channel="ARTE.fr"><title>Avant</title></programme>
+        <programme start="20261125210000 +0000" stop="20261125223000 +0000" channel="arte.fr"><title>Film du soir</title><desc>Un film.</desc></programme>
+        <programme start="20261125223000 +0000" stop="20261125233000 +0000" channel="arte.fr"><title>Documentaire</title></programme></tv>
+        """
+        let at = ProgramGuide.date("20261125213000 +0000")!
+        let g = ProgramGuide.parse(Data(xml.utf8), keepFrom: at.addingTimeInterval(-86400), until: at.addingTimeInterval(86400))
+        let nn = g.nowNext("ARTE.fr", at: at)
+        XCTAssertEqual(nn.now?.title, "Film du soir")
+        XCTAssertEqual(nn.now?.detail, "Un film.")
+        XCTAssertEqual(nn.next?.title, "Documentaire")
+    }
+
+    // MARK: surveillance du direct
+
+    func run(_ w: inout LiveWatchdog, from: Double, to: Double, position: (Double) -> Double?,
+             cache: Double = 0, failed: Bool = false) -> [(Double, LiveWatchdog.Action)] {
+        var out: [(Double, LiveWatchdog.Action)] = []
+        var t = from
+        while t <= to {
+            if let a = w.observe(.init(time: t, position: position(t), cacheSeconds: cache, failed: failed)) { out.append((t, a)) }
+            t += 0.5
+        }
+        return out
+    }
+
+    func testHealthyStreamIsLeftAlone() {
+        var w = LiveWatchdog()
+        XCTAssertTrue(run(&w, from: 0, to: 60, position: { $0 }).isEmpty)
+    }
+
+    func testFreezeTriggersGradedRecoveryWithBackoff() {
+        var w = LiveWatchdog()
+        w.hasAlternate = true
+        _ = run(&w, from: 0, to: 10, position: { $0 })
+        // figé à 10 s, avec des données en réserve
+        let actions = run(&w, from: 10.5, to: 40, position: { _ in 10 }, cache: 3)
+        XCTAssertEqual(actions.map(\.1).prefix(4), [.seekToLive, .reload, .alternateSource, .alternateSource])
+        XCTAssertEqual(actions.first!.0, 15.5, accuracy: 0.6)                // après 5 s sans progression
+        XCTAssertGreaterThanOrEqual(actions[2].0 - actions[1].0, 2)          // les essais s'espacent
+        XCTAssertTrue(w.isRecovering)
+    }
+
+    func testRecoveryIsMeasuredAndLadderResets() {
+        var w = LiveWatchdog()
+        _ = run(&w, from: 0, to: 10, position: { $0 })
+        _ = run(&w, from: 10.5, to: 18, position: { _ in 10 })
+        XCTAssertTrue(w.isRecovering)
+        _ = run(&w, from: 18.5, to: 25, position: { $0 })                    // ça repart
+        XCTAssertFalse(w.isRecovering)
+        XCTAssertNotNil(w.lastRecovery)
+    }
+
+    func testErrorsSkipSeekAndGiveUpEventually() {
+        var w = LiveWatchdog()
+        w.maxAttempts = 4
+        w.backoff = [0, 1, 1, 1]
+        let actions = run(&w, from: 0, to: 30, position: { _ in nil }, failed: true)
+        XCTAssertEqual(actions.first?.1, .reload)                            // erreur HTTP : rouvrir, pas se recaler
+        XCTAssertEqual(actions.filter { $0.1 != .giveUp }.count, 4)
+        XCTAssertEqual(actions.last?.1, .giveUp)
+    }
+
+    func testUserPauseIsNotAFreeze() {
+        var w = LiveWatchdog()
+        _ = run(&w, from: 0, to: 10, position: { $0 })
+        var t = 10.5
+        while t < 60 { XCTAssertNil(w.observe(.init(time: t, position: 10, userPaused: true))); t += 0.5 }
+    }
+
+    func testLiveOptionsCarryReconnectAndHeaders() {
+        let o = Dictionary(LiveOptions.mpv(userAgent: "UA", referer: "https://r.exemple/").map { ($0.0, $0.1) }, uniquingKeysWith: { a, _ in a })
+        XCTAssertTrue(o["stream-lavf-o"]!.contains("reconnect_streamed=1"))
+        XCTAssertEqual(o["user-agent"], "UA")
+        XCTAssertEqual(o["referrer"], "https://r.exemple/")
+    }
+}
