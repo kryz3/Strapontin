@@ -241,13 +241,18 @@ struct TMDbSearchSections: View {
 
     enum Phase: Equatable { case loading, done([TMDbSearchResult]), failed(String) }
     @State private var phases: [MediaKind: Phase] = [.movie: .loading, .tv: .loading]
+    /// Acteurs, réalisateurs… (nil = en cours).
+    @State private var people: [TMDbPerson]?
     @State private var availability: [String: Int] = [:]
     @State private var checking = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 36) {
+            // on cherche quelqu'un (« keanu », « villeneuve ») : ses fiches d'abord, puis les titres
+            if peopleFirst { peopleSection }
             section(.movie, title: "Films")
             section(.tv, title: "Séries")
+            if !peopleFirst { peopleSection }
         }
         // une tâche par texte cherché : la précédente est annulée, et une réponse n'est appliquée que si elle
         // correspond encore au texte affiché
@@ -295,8 +300,40 @@ struct TMDbSearchSections: View {
         }
     }
 
+    /// La recherche vise une personne : la première trouvée porte le texte tapé et est connue.
+    private var peopleFirst: Bool {
+        guard let first = people?.first else { return false }
+        let q = CatalogSearch.fold(query.trimmingCharacters(in: .whitespaces))
+        return q.count >= 3 && CatalogSearch.fold(first.name).contains(q) && first.popularity >= 3 && first.profilePath != nil
+    }
+
+    private func loadPeople(client c: TMDbClient, query: String) async {
+        let found = (try? await c.searchPeople(query)) ?? []
+        guard !Task.isCancelled, query == self.query else { return }
+        // les personnes connues pour leurs rôles d'abord, sans les fiches vides
+        withAnimation(.easeOut(duration: 0.2)) {
+            people = found.filter { $0.profilePath != nil || !$0.knownFor.isEmpty }.prefix(20).map { $0 }
+        }
+    }
+
+    @ViewBuilder private var peopleSection: some View {
+        if people == nil, query.count >= 2 {
+            Shelf(title: "Acteurs et équipe") {
+                ForEach(0..<8, id: \.self) { _ in
+                    VStack(spacing: 8) { Skeleton(corner: 60).frame(width: 110, height: 110); Skeleton(corner: 4).frame(width: 80, height: 10) }
+                }
+            }
+            .allowsHitTesting(false)
+        } else if let people, !people.isEmpty {
+            Shelf(title: "Acteurs et équipe") {
+                ForEach(people) { PersonCard(person: $0) }
+            }
+        }
+    }
+
     private func run(_ query: String) async {
         phases = [.movie: .loading, .tv: .loading]
+        people = nil
         availability = [:]
         checking = false
         try? await Task.sleep(nanoseconds: 300_000_000)   // on attend que la frappe se calme
@@ -310,7 +347,9 @@ struct TMDbSearchSections: View {
         // films et séries en parallèle ; chaque section s'affiche dès que sa propre réponse arrive
         async let movies = load(.movie, client: c, query: query, since: t0)
         async let shows = load(.tv, client: c, query: query, since: t0)
+        async let persons: Void = loadPeople(client: c, query: query)
         let all = await movies + shows
+        _ = await persons
         guard !Task.isCancelled, query == self.query, tracker.configured else { return }
         let notOwned = all.filter { store.media[Media.key($0.kind, $0.id)] == nil }
         guard !notOwned.isEmpty else { return }
@@ -780,5 +819,130 @@ struct FicheSkeleton: View {
             .padding(.horizontal, Theme.margin)
         }
         .allowsHitTesting(false)
+    }
+}
+
+/// Une personne dans la recherche : photo ronde, nom, et un ou deux titres connus.
+struct PersonCard: View {
+    let person: TMDbPerson
+    @State private var hover = false
+
+    var body: some View {
+        NavigationLink(value: PersonLink.value(person.id)) {
+            VStack(spacing: 8) {
+                PersonPhoto(path: person.profilePath, name: person.name, size: 110)
+                    .scaleEffect(hover ? 1.05 : 1)
+                    .shadow(color: .black.opacity(hover ? 0.45 : 0.2), radius: hover ? 12 : 5, y: 4)
+                Text(person.name).font(.system(size: 13, weight: .semibold)).lineLimit(1)
+                Text(person.knownFor.prefix(2).joined(separator: ", ")).font(.system(size: 11)).foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            .frame(width: 130)
+        }
+        .buttonStyle(.plain)
+        .onHover { h in withAnimation(.easeOut(duration: 0.15)) { hover = h } }
+    }
+}
+
+/// Photo ronde d'une personne, ou ses initiales.
+struct PersonPhoto: View {
+    let path: String?
+    let name: String
+    var size: CGFloat = 96
+
+    var body: some View {
+        ZStack {
+            Circle().fill(Color(white: 0.18))
+            Text(name.split(separator: " ").prefix(2).compactMap(\.first).map(String.init).joined())
+                .font(.system(size: size * 0.23, weight: .semibold)).foregroundStyle(.secondary)
+            RemoteImage(url: TMDbClient.imageURL(path, size: size > 140 ? "h632" : "w185")).clipShape(Circle())
+        }
+        .frame(width: size, height: size)
+    }
+}
+
+enum PersonLink {
+    static func value(_ id: Int) -> String { "person:\(id)" }
+    static func parse(_ s: String) -> Int? {
+        guard s.hasPrefix("person:") else { return nil }
+        return Int(s.dropFirst("person:".count))
+    }
+}
+
+/// Page d'une personne : photo, biographie, filmographie (films et séries, ceux de la bibliothèque cochés).
+struct PersonView: View {
+    let personId: Int
+    @State private var details: TMDbPersonDetails?
+    @State private var error: String?
+    @State private var showBio = false
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 34) {
+                if let d = details {
+                    header(d)
+                    TMDbShelf(title: "Filmographie", results: d.credits, grid: true)
+                } else if let error {
+                    ContentUnavailableView("Fiche indisponible", systemImage: "person.crop.circle.badge.exclamationmark",
+                                           description: Text(error)).padding(.top, 140)
+                } else {
+                    HStack(alignment: .top, spacing: 30) {
+                        Skeleton(corner: 110).frame(width: 220, height: 220)
+                        VStack(alignment: .leading, spacing: 12) {
+                            Skeleton(corner: 6).frame(width: 300, height: 34)
+                            Skeleton(corner: 4).frame(width: 220, height: 12)
+                            Skeleton(corner: 4).frame(maxWidth: 560).frame(height: 70)
+                        }
+                    }
+                    .padding(.horizontal, Theme.margin)
+                    SkeletonShelf(title: "Filmographie")
+                }
+            }
+            .padding(.top, 96).padding(.bottom, 40)
+        }
+        .ignoresSafeArea(edges: .top)
+        .background(Theme.backdrop)
+        .task(id: personId) {
+            guard details == nil else { return }
+            guard let c = tmdbClient() else { error = "Ajoute une clé TMDb dans les réglages."; return }
+            do { details = try await c.person(personId) } catch { self.error = error.localizedDescription }
+        }
+    }
+
+    private func header(_ d: TMDbPersonDetails) -> some View {
+        HStack(alignment: .top, spacing: 30) {
+            PersonPhoto(path: d.person.profilePath, name: d.person.name, size: 220)
+            VStack(alignment: .leading, spacing: 10) {
+                Text(d.person.name).font(.system(size: 36, weight: .bold))
+                let facts = [Self.department(d.person.department), Self.birth(d.birthday, d.placeOfBirth)].compactMap { $0 }
+                if !facts.isEmpty {
+                    Text(facts.joined(separator: " · ")).font(.system(size: 13)).foregroundStyle(.secondary)
+                }
+                if !d.biography.isEmpty {
+                    Text(d.biography).font(.system(size: 14)).foregroundStyle(.white.opacity(0.85))
+                        .lineLimit(showBio ? nil : 6).frame(maxWidth: 640, alignment: .leading)
+                    Button(showBio ? "Moins" : "Lire la suite") { withAnimation { showBio.toggle() } }
+                        .buttonStyle(.plain).font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.accentText)
+                }
+            }
+        }
+        .padding(.horizontal, Theme.margin)
+    }
+
+    static func department(_ d: String?) -> String? {
+        switch d {
+        case "Acting": return "Acteur, actrice"
+        case "Directing": return "Réalisation"
+        case "Writing": return "Scénario"
+        case "Production": return "Production"
+        case nil: return nil
+        default: return d
+        }
+    }
+
+    static func birth(_ date: String?, _ place: String?) -> String? {
+        guard let date, !date.isEmpty else { return place }
+        let y = date.prefix(4)
+        return place.map { "Né(e) en \(y) · \($0)" } ?? "Né(e) en \(y)"
     }
 }

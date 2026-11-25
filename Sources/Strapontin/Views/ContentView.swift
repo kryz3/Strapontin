@@ -133,6 +133,8 @@ struct ContentView: View {
         } else if let (k, tmdbId) = TMDbLink.parse(id) ?? TMDbLink.parseKey(id) {
             // une seule page par fiche : aperçu tant qu'on ne l'a pas, fiche de la bibliothèque dès qu'elle arrive
             FicheView(kind: k, tmdbId: tmdbId)
+        } else if let pid = PersonLink.parse(id) {
+            PersonView(personId: pid)
         } else if id.hasPrefix("dl:") {
             DownloadDetailView(entryId: id)
         } else if id == "tracker" {

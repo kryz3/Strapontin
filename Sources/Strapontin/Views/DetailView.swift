@@ -238,19 +238,20 @@ struct CastRow: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(alignment: .top, spacing: 20) {
                     ForEach(cast) { c in
-                        VStack(spacing: 8) {
-                            ZStack {
-                                Circle().fill(Color(white: 0.18))
-                                Text(initials(c.name)).font(.system(size: 22, weight: .semibold)).foregroundStyle(.secondary)
-                                RemoteImage(url: TMDbClient.imageURL(c.profilePath, size: "w185")).clipShape(Circle())
+                        // chaque acteur ouvre sa page (photo, biographie, filmographie)
+                        NavigationLink(value: PersonLink.value(c.id)) {
+                            VStack(spacing: 8) {
+                                PersonPhoto(path: c.profilePath, name: c.name, size: 96)
+                                Text(c.name).font(.system(size: 12, weight: .semibold)).lineLimit(1)
+                                if let ch = c.character, !ch.isEmpty {
+                                    Text(ch).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
+                                }
                             }
-                            .frame(width: 96, height: 96)
-                            Text(c.name).font(.system(size: 12, weight: .semibold)).lineLimit(1)
-                            if let ch = c.character, !ch.isEmpty {
-                                Text(ch).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
-                            }
+                            .frame(width: 110)
+                            .contentShape(Rectangle())
                         }
-                        .frame(width: 110)
+                        .buttonStyle(.plain)
+                        .help("Voir \(c.name)")
                     }
                 }
                 .padding(.horizontal, Theme.margin)
