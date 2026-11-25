@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import StrapontinCore
 import SwiftUI
@@ -202,14 +203,16 @@ final class IPTVStore: ObservableObject {
     }
 
     private static func write<T: Encodable>(_ value: T, to url: URL) {
-        if let data = try? JSONEncoder().encode(value) {
-            FileManager.default.createFile(atPath: url.path, contents: data, attributes: [.posixPermissions: 0o600])
+        autoreleasepool {
+            if let data = try? JSONEncoder().encode(value) {
+                FileManager.default.createFile(atPath: url.path, contents: data, attributes: [.posixPermissions: 0o600])
+            }
         }
     }
 
     private static func read<T: Decodable & Sendable>(_ type: T.Type, _ url: URL) async -> T? {
         await Task.detached(priority: .userInitiated) {
-            (try? Data(contentsOf: url)).flatMap { try? JSONDecoder().decode(T.self, from: $0) }
+            autoreleasepool { (try? Data(contentsOf: url)).flatMap { try? JSONDecoder().decode(T.self, from: $0) } }
         }.value
     }
 
@@ -313,6 +316,8 @@ final class IPTVStore: ObservableObject {
             vodLookup = await Task.detached(priority: .utility) { VODLookup(refs.values.flatMap { $0 }) }.value
             Perf.log("iptv : index films/séries à jour (\(vodLookup.count))", since: t0)
         }
+        // rendre au système la mémoire des réponses lues (sinon elle reste réservée jusqu'à la relance)
+        malloc_zone_pressure_relief(nil, 0)
     }
 
     private struct LiveResult: Sendable { var entries: [IPTVEntry]; var guideURL: String?; var vod: [VODRef]? }
@@ -341,13 +346,26 @@ final class IPTVStore: ObservableObject {
         }.value
     }
 
-    /// Films et séries d'un compte Xtream : deux listes, réduites à l'index léger hors du fil principal.
+    /// Films et séries d'un compte Xtream, catégorie par catégorie : chaque réponse est petite, lue puis libérée tout
+    /// de suite (la liste complète d'un coup faisait monter l'app à 1,4 Go). Sans catégories : la liste entière.
     private static func fetchVOD(_ account: XtreamAccount, _ p: IPTVPlaylist) async throws -> [VODRef] {
-        let movies = try await data(account.api("get_vod_streams"), p)
-        let m = await Task.detached(priority: .utility) { XtreamParser.vodRefs(movies, kind: .movie) }.value
-        let series = try await data(account.api("get_series"), p)
-        let s = await Task.detached(priority: .utility) { XtreamParser.vodRefs(series, kind: .series) }.value
-        return m + s
+        var out: [VODRef] = []
+        for (kind, catAction, listAction) in [(IPTVKind.movie, "get_vod_categories", "get_vod_streams"),
+                                              (.series, "get_series_categories", "get_series")] {
+            let cats = Array(XtreamParser.categories(try await data(account.api(catAction), p)).keys)
+            if cats.isEmpty {
+                let d = try await data(account.api(listAction), p)
+                out += await Task.detached(priority: .utility) { autoreleasepool { XtreamParser.vodRefs(d, kind: kind) } }.value
+                continue
+            }
+            for c in cats {
+                guard let d = try? await data(account.api(listAction, ["category_id": c]), p) else { continue }
+                out += await Task.detached(priority: .utility) { autoreleasepool { XtreamParser.vodRefs(d, kind: kind) } }.value
+            }
+        }
+        // un même titre peut être rangé dans plusieurs catégories
+        var seen = Set<String>()
+        return out.filter { seen.insert($0.id).inserted }
     }
 
     private static func load(_ source: String, _ p: IPTVPlaylist) async throws -> String {
