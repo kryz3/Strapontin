@@ -19,6 +19,8 @@ protocol PlayerActions: AnyObject {
     func zapBack()
     func toggleFavoriteChannel()
     func retryLive()
+    /// Direct : changer de qualité (variante de la chaîne).
+    func selectQuality(_ variantID: String)
     func select(_ track: Track?, type: String)
     func toggleInfo()
     func refreshTracks()
@@ -95,6 +97,14 @@ struct PlayerControlsView: View {
                     .transition(.move(edge: .trailing).combined(with: .opacity))
             }
 
+            if let n = model.live?.notice, !(model.live?.reconnecting ?? false) {
+                Label(n, systemImage: "dial.medium")
+                    .font(.system(size: 12, weight: .semibold)).foregroundStyle(.white)
+                    .padding(.horizontal, 14).padding(.vertical, 8)
+                    .background(.ultraThinMaterial, in: Capsule())
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top).padding(.top, 20)
+                    .transition(.opacity).allowsHitTesting(false)
+            }
             if let live = model.live, live.reconnecting, !live.failed {
                 Label("Reconnexion…", systemImage: "arrow.triangle.2.circlepath")
                     .font(.system(size: 12, weight: .semibold)).foregroundStyle(.white)
@@ -218,12 +228,17 @@ struct PlayerControlsView: View {
                         Image(systemName: "captions.bubble.fill").font(.system(size: 15, weight: .semibold))
                     }
                     .buttonStyle(GlassCircle(size: 38))
+                    .help(live.qualities.isEmpty ? "Audio et sous-titres" : "Qualité, audio et sous-titres")
                     .popover(isPresented: $showTracks, arrowEdge: .top) {
-                        TracksPanel(audio: model.audioTracks, subs: model.subTracks) { t, type in actions.select(t, type: type) }
+                        TracksPanel(audio: model.audioTracks, subs: model.subTracks, qualities: live.qualities,
+                                    currentQuality: live.currentQuality, selectQuality: actions.selectQuality) { t, type in actions.select(t, type: type) }
                     }
                     VolumeControl(volume: model.volume, set: actions.setVolume, mute: actions.toggleMute)
-                    Button(action: actions.toggleMini) { Image(systemName: "pip.enter").font(.system(size: 14, weight: .bold)) }
-                        .buttonStyle(GlassCircle(size: 38))
+                    Button(action: actions.toggleMini) {
+                        Image(systemName: model.mini ? "pip.exit" : "pip.enter").font(.system(size: 14, weight: .bold))
+                    }
+                    .buttonStyle(GlassCircle(size: 38))
+                    .help(model.mini ? "Agrandir (⇧P)" : "Mini-lecteur, toujours devant (⇧P)")
                     Button(action: actions.toggleFullScreen) {
                         Image(systemName: model.isFullScreen ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
                             .font(.system(size: 14, weight: .bold))
@@ -349,15 +364,38 @@ struct PlayerControlsView: View {
 struct TracksPanel: View {
     let audio: [Track]
     let subs: [Track]
+    /// Direct : les qualités de la chaîne (4K, Full HD, HD, SD, secours).
+    var qualities: [ChannelVariant] = []
+    var currentQuality: String?
+    var selectQuality: (String) -> Void = { _ in }
     let select: (Track?, String) -> Void
+
+    init(audio: [Track], subs: [Track], qualities: [ChannelVariant] = [], currentQuality: String? = nil,
+         selectQuality: @escaping (String) -> Void = { _ in }, select: @escaping (Track?, String) -> Void) {
+        self.audio = audio; self.subs = subs; self.qualities = qualities; self.currentQuality = currentQuality
+        self.selectQuality = selectQuality; self.select = select
+    }
 
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
+            if !qualities.isEmpty {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("QUALITÉ").font(.system(size: 11, weight: .heavy)).foregroundStyle(.secondary)
+                        .padding(.horizontal, 10).padding(.bottom, 6)
+                    ForEach(qualities) { q in
+                        row(q.label, selected: q.id == currentQuality) { selectQuality(q.id) }
+                            .help(q.rawName)
+                    }
+                }
+                .padding(14)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                Divider()
+            }
             column("Audio", audio, type: "audio", allowNone: false)
             Divider()
             column("Sous-titres", subs, type: "sub", allowNone: true)
         }
-        .frame(width: 520)
+        .frame(width: qualities.isEmpty ? 520 : 720)
         .frame(minHeight: 160)
     }
 

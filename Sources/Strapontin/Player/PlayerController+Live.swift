@@ -10,8 +10,10 @@ extension PlayerController {
     static func playLive(_ e: IPTVEntry) {
         let store = IPTVStore.shared
         let p = store.playlist(of: e)
-        let item = PlayItem(path: e.url, title: e.name, subtitle: e.group, start: 0,
-                            live: LiveInfo(entry: e, alternates: store.alternates(e), userAgent: p?.userAgent ?? "", referer: p?.referer ?? ""))
+        let v = store.preferredVariant(e)
+        let item = PlayItem(path: v?.url ?? e.url, title: e.name, subtitle: e.group, start: 0,
+                            live: LiveInfo(entry: e, alternates: store.alternates(e), variants: store.variants(of: e), variantID: v?.id,
+                                           userAgent: p?.userAgent ?? "", referer: p?.referer ?? ""))
         if let c = current, c.isLive { c.switchChannel(item); return }
         play([item])
     }
@@ -23,7 +25,7 @@ extension PlayerController {
             liveURL = item.path
             alternateIndex = 0
             watchdog = LiveWatchdog()
-            watchdog.hasLowerBitrate = item.path.lowercased().contains(".m3u8")
+            watchdog.hasLowerBitrate = item.path.lowercased().contains(".m3u8") || lowerVariant(than: live.variantID, in: live) != nil
             watchdog.hasAlternate = !live.alternates.isEmpty
             watchdog.opened(at: CACurrentMediaTime())
             liveEnded = false
@@ -46,6 +48,9 @@ extension PlayerController {
                             favorite: IPTVStore.shared.isFavorite(e))
         d.reconnecting = watchdog.isRecovering
         d.failed = model.live?.failed ?? false
+        d.qualities = live.variants.count > 1 ? live.variants : []
+        d.currentQuality = live.variantID
+        d.notice = liveNotice
         if model.live != d { model.live = d }
     }
 
@@ -81,8 +86,15 @@ extension PlayerController {
         case .reload:
             reopen(liveURL)
         case .lowerBitrate:
-            player.set("hls-bitrate", "min")
-            reopen(liveURL)
+            // une variante plus légère de la chaîne s'il y en a, sinon le débit le plus bas du flux HLS
+            if let live = queue[index].live, let lower = lowerVariant(than: queue[index].live?.variantID, in: live) {
+                queue[index].live?.variantID = lower.id
+                showNotice("Qualité réduite : \(lower.label)")
+                reopen(lower.url)
+            } else {
+                player.set("hls-bitrate", "min")
+                reopen(liveURL)
+            }
         case .alternateSource:
             guard let alts = queue[index].live?.alternates, !alts.isEmpty else { reopen(liveURL); return }
             alternateIndex = (alternateIndex + 1) % (alts.count + 1)
@@ -100,6 +112,37 @@ extension PlayerController {
         player.command(["loadfile", url, "replace"])
         player.set("pause", "no")
         watchdog.opened(at: CACurrentMediaTime())
+    }
+
+    /// Variante de qualité inférieure (hors secours) à celle qu'on lit.
+    func lowerVariant(than id: String?, in live: LiveInfo) -> ChannelVariant? {
+        let v = live.variants.filter { !$0.backup }
+        guard let cur = v.first(where: { $0.id == id }) else { return nil }
+        return v.first { $0.quality < cur.quality }
+    }
+
+    /// Changer de qualité sans quitter le lecteur ; retenu pour cette chaîne.
+    func selectQuality(_ variantID: String) {
+        guard index < queue.count, let live = queue[index].live, let v = live.variants.first(where: { $0.id == variantID }),
+              variantID != live.variantID else { return }
+        IPTVStore.shared.chooseQuality(variantID, for: live.entry)
+        queue[index].live?.variantID = variantID
+        queue[index].path = v.url
+        watchdog.reset()
+        model.live?.failed = false
+        player.set("hls-bitrate", "max")
+        showNotice(v.label)
+        reopen(v.url)
+        updateLiveDisplay()
+    }
+
+    func showNotice(_ text: String) {
+        liveNotice = text
+        updateLiveDisplay()
+        noticeTimer?.invalidate()
+        noticeTimer = Timer.scheduledTimer(withTimeInterval: 3, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated { self?.liveNotice = nil; self?.updateLiveDisplay() }
+        }
     }
 
     func retryLive() {

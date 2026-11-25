@@ -40,6 +40,29 @@ final class IPTVStore: ObservableObject {
 
     var configured: Bool { !playlists.isEmpty }
 
+    // MARK: chaînes regroupées
+
+    /// Variantes de chaque chaîne (4K, FHD, HD, SD, secours), la meilleure d'abord.
+    private(set) var variants: [String: [ChannelVariant]] = [:]
+    /// Entrée de la playlist → chaîne (pour retrouver d'anciens favoris).
+    private var groupOf: [String: String] = [:]
+    private var channelByID: [String: IPTVEntry] = [:]
+    /// Qualité choisie par chaîne : identifiant de la variante.
+    private var qualityChoice: [String: String] = UserDefaults.standard.dictionary(forKey: "iptvQuality") as? [String: String] ?? [:]
+
+    func variants(of e: IPTVEntry) -> [ChannelVariant] { variants[e.id] ?? [] }
+
+    /// La variante à ouvrir : celle choisie pour cette chaîne, sinon la meilleure.
+    func preferredVariant(_ e: IPTVEntry) -> ChannelVariant? {
+        let v = variants(of: e)
+        return v.first { $0.id == qualityChoice[e.id] } ?? v.first
+    }
+
+    func chooseQuality(_ variantID: String, for e: IPTVEntry) {
+        qualityChoice[e.id] = variantID
+        UserDefaults.standard.set(qualityChoice, forKey: "iptvQuality")
+    }
+
     // MARK: pays
 
     /// Pays présents, avec leur nombre de chaînes / titres ; « » = sans pays reconnu.
@@ -177,10 +200,15 @@ final class IPTVStore: ObservableObject {
             allVOD += r.vod.map(\.item)
             if !p.guide.isEmpty { guides.append(p.guide) } else if let g = r.guideURL { guides.append(g) }
         }
-        channels = allChannels
+        let grouped = await Task.detached(priority: .userInitiated) { ChannelGrouping.group(allChannels) }.value
+        variants = grouped.variants
+        groupOf = grouped.groupOf
+        channelByID = Dictionary(grouped.channels.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        channels = grouped.channels
+        migrateIDs()
         vod = allVOD
         rebuildIndexes()
-        Perf.log("iptv : \(allChannels.count) chaînes, \(allVOD.count) titres", since: t0)
+        Perf.log("iptv : \(allChannels.count) entrées → \(channels.count) chaînes, \(allVOD.count) titres", since: t0)
         if let g = guides.first { await loadGuide(g, playlist: playlists.first) }
     }
 
@@ -189,7 +217,7 @@ final class IPTVStore: ObservableObject {
         let v = vod.map { IPTVEntry(id: $0.id, name: $0.name, url: $0.url ?? "", tvgId: nil, logo: $0.poster, group: $0.category,
                                     number: nil, kind: $0.kind, playlist: "") }
         Task.detached(priority: .userInitiated) {
-            let a = IPTVSearchIndex(ch), b = IPTVSearchIndex(v)
+            let a = IPTVSearchIndex(ch, channelNames: true), b = IPTVSearchIndex(v)
             var cc: [String: String] = [:], vc: [String: String] = [:]
             var cn: [String: Int] = [:], vn: [String: Int] = [:]
             for e in ch {
@@ -319,14 +347,29 @@ final class IPTVStore: ObservableObject {
         return url
     }
 
-    func channel(_ id: String) -> IPTVEntry? { channels.first { $0.id == id } }
+    func channel(_ id: String) -> IPTVEntry? { channelByID[id] ?? groupOf[id].flatMap { channelByID[$0] } }
+
+    /// Favoris et récentes enregistrés avec l'identifiant d'une entrée de playlist : ramenés à leur chaîne.
+    private func migrateIDs() {
+        func map(_ ids: [String]) -> [String] {
+            var seen = Set<String>()
+            return ids.map { channelByID[$0] != nil ? $0 : (groupOf[$0] ?? $0) }.filter { seen.insert($0).inserted }
+        }
+        let f = map(favorites), r = map(recents)
+        if f != favorites || r != recents { favorites = f; recents = r; saveState() }
+    }
     var favoriteChannels: [IPTVEntry] { favorites.compactMap(channel) }
     var recentChannels: [IPTVEntry] { recents.compactMap(channel) }
 
     /// Autres adresses de la même chaîne (même tvg-id ou même nom) : sources de secours.
     func alternates(_ e: IPTVEntry) -> [String] {
-        let name = CatalogFold.fold(e.name)
-        return channels.filter { $0.id != e.id && (($0.tvgId != nil && $0.tvgId == e.tvgId) || CatalogFold.fold($0.name) == name) }.map(\.url)
+        let chosen = preferredVariant(e)?.url ?? e.url
+        var out = variants(of: e).map(\.url).filter { $0 != chosen }
+        // même tvg-id sous un autre nom
+        if let t = e.tvgId {
+            for c in channels where c.id != e.id && c.tvgId == t { out += variants(of: c).map(\.url) }
+        }
+        return out
     }
 
     func playlist(of e: IPTVEntry) -> IPTVPlaylist? { playlists.first { $0.id == e.playlist } ?? playlists.first }

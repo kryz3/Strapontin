@@ -266,6 +266,7 @@ public enum ChannelGrouping {
             rep.logo = m.lazy.compactMap(\.0.logo).first
             rep.number = m.compactMap(\.0.number).min()
             rep.tvgId = m.lazy.compactMap(\.0.tvgId).first
+            if rep.country == nil, let c = m.lazy.compactMap({ $0.0.country ?? $0.1.country }).first { rep.country = c }
             channels.append(rep)
             variants[gid] = m.map { ChannelVariant(id: $0.0.id, url: $0.0.url, rawName: $0.0.name, quality: $0.1.quality, backup: $0.1.backup) }
             for x in m { groupOf[x.0.id] = gid }

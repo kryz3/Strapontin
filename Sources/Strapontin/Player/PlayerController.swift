@@ -16,6 +16,9 @@ struct PlayItem: Hashable {
 struct LiveInfo: Hashable {
     var entry: IPTVEntry
     var alternates: [String]
+    /// Qualités de la chaîne (4K, FHD, HD…), la meilleure d'abord ; celle qu'on lit.
+    var variants: [ChannelVariant] = []
+    var variantID: String?
     var userAgent: String
     var referer: String
 }
@@ -31,6 +34,10 @@ struct LiveDisplay: Equatable {
     var favorite: Bool
     var reconnecting = false
     var failed = false
+    var qualities: [ChannelVariant] = []
+    var currentQuality: String?
+    /// Message discret quelques secondes (« Qualité réduite : HD »).
+    var notice: String?
 }
 
 extension PlayItem {
@@ -136,6 +143,8 @@ final class PlayerController: NSObject, NSWindowDelegate {
     var liveURL = ""
     var alternateIndex = 0
     var previousChannel: IPTVEntry?
+    var liveNotice: String?
+    var noticeTimer: Timer?
     var numberTimer: Timer?
 
     static func play(_ items: [PlayItem]) {
