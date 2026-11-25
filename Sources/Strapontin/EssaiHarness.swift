@@ -117,6 +117,9 @@ final class EssaiHarness: ObservableObject {
             if let r = FeedReaction(rawValue: arg), let first = m.cards.first { m.react(first, r) }
             print("ESSAI pourtoi", m.cards.prefix(8).map { "\($0.title) [\($0.genreIds.first ?? 0)] ← \($0.because ?? "découverte")" }.joined(separator: " | "))
             fflush(stdout)
+        case "chercher-chaine", "pays":   // comme la frappe dans la recherche d'« En direct » / un clic dans la barre des pays
+            if verb == "pays" { IPTVStore.shared.country = arg.isEmpty ? nil : arg }
+            else { NotificationCenter.default.post(name: .essaiLiveQuery, object: arg) }
         case "chaine":   // chaine:<nom exact> : comme un clic sur la chaîne
             if let e = IPTVStore.shared.channels.first(where: { $0.name == arg }) { PlayerController.playLive(e) }
         case "qualite":   // qualite:<clé de fiche>|<choix> : comme le menu de la cloche
@@ -166,4 +169,8 @@ final class EssaiHarness: ObservableObject {
         view.cacheDisplay(in: view.bounds, to: rep)
         try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
     }
+}
+
+extension Notification.Name {
+    static let essaiLiveQuery = Notification.Name("essaiLiveQuery")
 }

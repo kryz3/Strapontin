@@ -181,3 +181,76 @@ final class XtreamTests: XCTestCase {
         XCTAssertEqual(VODTitle.year("Oppenheimer (2023) HD"), 2023)
     }
 }
+
+final class IPTVCountryTests: XCTestCase {
+    func d(_ group: String, _ name: String = "Chaîne", tvg: String? = nil, id: String? = nil) -> String? {
+        IPTVCountry.detect(tvgCountry: tvg, group: group, name: name, tvgId: id)
+    }
+
+    func testProviderPrefixes() {
+        XCTAssertEqual(d("FR | Sport"), "FR")
+        XCTAssertEqual(d("|FR| Cinéma"), "FR")
+        XCTAssertEqual(d("FR: Généraliste"), "FR")
+        XCTAssertEqual(d("[FR] Info"), "FR")
+        XCTAssertEqual(d("FR - Jeunesse"), "FR")
+        XCTAssertEqual(d("FRANCE FHD"), "FR")
+        XCTAssertEqual(d("VIP | FRANCE SPORT"), "FR")
+        XCTAssertEqual(d("UK | Entertainment"), "GB")
+        XCTAssertEqual(d("USA Network"), "US")
+        XCTAssertEqual(d("DE: Sport"), "DE")
+        XCTAssertEqual(d("Italia"), "IT")
+        XCTAssertEqual(d("Belgique"), "BE")
+        XCTAssertEqual(d("🇵🇹 Desporto"), "PT")
+        XCTAssertEqual(d("VOD FRANCE Action"), "FR")
+        XCTAssertEqual(d("VOD UK | Action"), "GB")
+        XCTAssertEqual(d("VOD DE: Drame"), "DE")
+        XCTAssertEqual(d("VIP |FR| Sport"), "FR")
+    }
+
+    func testRegions() {
+        XCTAssertEqual(d("AR | MBC"), "ARAB")
+        XCTAssertEqual(d("EX-YU | Sport"), "EXYU")
+        XCTAssertEqual(d("LATINO | Deportes"), "LATAM")
+        XCTAssertEqual(IPTVCountry.label("ARAB"), "Arabe")
+        XCTAssertEqual(IPTVCountry.flag("FR"), "🇫🇷")
+        XCTAssertEqual(IPTVCountry.label("FR"), "France")
+    }
+
+    func testNameTvgCountryAndTvgId() {
+        XCTAssertEqual(d("Sport", "FR: beIN Sports 1"), "FR")
+        XCTAssertEqual(d("Sport", "Sky", tvg: "gb"), "GB")
+        XCTAssertEqual(d("Généraliste", "TF1", id: "TF1.fr"), "FR")
+        XCTAssertEqual(d("Généraliste", "France 2"), "FR")
+    }
+
+    func testNoFalseCountries() {
+        XCTAssertNil(d("Sport"))
+        XCTAssertNil(d("Sport | TV"))
+        XCTAssertNil(d("VOD | Films"))
+        XCTAssertNil(d("Démos publiques", "Apple BipBop", id: "bipbop"))
+        XCTAssertNil(d("Divers", "BE IN SPORT 1"))
+        XCTAssertNil(d("Divers", "TF1 HD"))
+        XCTAssertNil(d("Divers", "Canal+ Sport"))
+        XCTAssertNil(d("Divers", "M6", id: "m6.tv"))
+    }
+
+    func testThemedLiveGroupsStayLive() {
+        let m3u = """
+        #EXTM3U
+        #EXTINF:-1 group-title="FR | Cinéma",Canal+ Cinéma
+        http://x/live/u/p/1.ts
+        #EXTINF:-1 group-title="UK | Séries",Sky Showcase
+        http://x/u/p/2
+        #EXTINF:-1 group-title="FR | Films",Ciné+ Frisson
+        http://x/hls/3.m3u8
+        #EXTINF:-1 group-title="VOD | FR | Action",Film (2020)
+        http://x/u/p/4
+        """
+        XCTAssertEqual(M3UParser.parse(m3u, playlist: "p").entries.map(\.kind), [.live, .live, .live, .movie])
+    }
+
+    func testParserFillsCountry() {
+        let m3u = "#EXTM3U\n#EXTINF:-1 tvg-id=\"tf1.fr\" group-title=\"FR | Généraliste\",TF1\nhttp://x/1.ts\n"
+        XCTAssertEqual(M3UParser.parse(m3u, playlist: "p").entries.first?.country, "FR")
+    }
+}

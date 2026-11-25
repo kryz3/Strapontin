@@ -16,11 +16,13 @@ public struct IPTVEntry: Codable, Hashable, Identifiable, Sendable {
     public var kind: IPTVKind
     /// Playlist d'origine.
     public var playlist: String
+    /// Pays (voir `IPTVCountry`), absent des caches d'avant.
+    public var country: String?
 
     public init(id: String, name: String, url: String, tvgId: String?, logo: String?, group: String, number: Int?,
-                kind: IPTVKind, playlist: String) {
+                kind: IPTVKind, playlist: String, country: String? = nil) {
         self.id = id; self.name = name; self.url = url; self.tvgId = tvgId; self.logo = logo; self.group = group
-        self.number = number; self.kind = kind; self.playlist = playlist
+        self.number = number; self.kind = kind; self.playlist = playlist; self.country = country
     }
 }
 
@@ -70,7 +72,9 @@ public enum M3UParser {
                 if a["tvg-chno"] != nil || a["channel-number"] != nil { explicit.insert(playlist + "/" + id) }
                 entries.append(IPTVEntry(id: playlist + "/" + id, name: name, url: line, tvgId: a["tvg-id"],
                                          logo: a["tvg-logo"].flatMap { $0.isEmpty ? nil : $0 }, group: group,
-                                         number: number, kind: kind, playlist: playlist))
+                                         number: number, kind: kind, playlist: playlist,
+                                         country: IPTVCountry.detect(tvgCountry: a["tvg-country"], group: group, name: name,
+                                                                     tvgId: a["tvg-id"])))
                 pending = nil
             }
         }
@@ -138,12 +142,16 @@ public enum M3UParser {
         let vodExt = [".mp4", ".mkv", ".avi", ".mov", ".m4v", ".wmv"]
         let g = CatalogFold.fold(group)
         let seriesWords = ["serie", "series", "tv show", "shows", "saison"]
-        let movieWords = ["vod", "film", "movie", "cinema"]
         if vodExt.contains(where: { path.hasSuffix($0) }) {
             return seriesWords.contains(where: { g.contains($0) }) || isEpisodeName(attrs["tvg-name"] ?? "") ? .series : .movie
         }
-        if seriesWords.contains(where: { g.contains($0) }) && !g.contains("live") { return .series }
-        if movieWords.contains(where: { g.contains($0) }) && !g.contains("live") { return .movie }
+        // flux en direct évident : liste HLS, transport MPEG-TS, chemin /live/ — quel que soit le nom du groupe
+        // (« FR | Cinéma », « UK | Séries » sont des bouquets de chaînes)
+        if path.hasSuffix(".m3u8") || path.hasSuffix(".ts") || u.contains("/live/") { return .live }
+        // adresse sans extension : seuls les groupes marqués VOD sont du catalogue
+        if g.contains("vod") && !g.contains("live") {
+            return seriesWords.contains(where: { g.contains($0) }) || isEpisodeName(attrs["tvg-name"] ?? "") ? .series : .movie
+        }
         return .live
     }
 

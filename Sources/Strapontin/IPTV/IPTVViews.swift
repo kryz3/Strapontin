@@ -11,14 +11,21 @@ struct LiveTVView: View {
     @State private var group: String = LiveTVView.all
     static let all = "Toutes"
 
+    /// Chaînes du pays choisi.
+    private var inCountry: [IPTVEntry] { store.country == nil ? store.channels : store.channels.filter(store.inCountry) }
+
     private var groups: [String] {
         var seen = Set<String>(), out: [String] = []
-        for c in store.channels where seen.insert(c.group).inserted { out.append(c.group) }
+        for c in inCountry where seen.insert(c.group).inserted { out.append(c.group) }
         return out
     }
 
     private var shown: [IPTVEntry] {
-        group == Self.all ? store.channels : store.channels.filter { $0.group == group }
+        group == Self.all ? inCountry : inCountry.filter { $0.group == group }
+    }
+
+    private var allTitle: String {
+        store.country.map { "Toutes les chaînes · \(IPTVCountry.label($0))" } ?? "Toutes les chaînes"
     }
 
     var body: some View {
@@ -28,15 +35,19 @@ struct LiveTVView: View {
                 if !store.configured {
                     IPTVSetupNotice()
                 } else if !query.isEmpty {
-                    channelGrid(results, title: results.isEmpty ? "Aucune chaîne pour « \(query) »" : "Chaînes")
+                    if !store.channelCountries.isEmpty { CountryBar(counts: store.channelCountries, total: store.channels.count) }
+                    let found = results.filter(store.inCountry)
+                    channelGrid(found, title: found.isEmpty ? "Aucune chaîne pour « \(query) »"
+                                + (store.country.map { " en \(IPTVCountry.label($0))" } ?? "") : "Chaînes")
                 } else {
                     if !store.favoriteChannels.isEmpty { channelRow("Favoris", store.favoriteChannels, reorder: true) }
                     if !store.recentChannels.isEmpty { channelRow("Récentes", Array(store.recentChannels.prefix(15))) }
+                    if !store.channelCountries.isEmpty { CountryBar(counts: store.channelCountries, total: store.channels.count) }
                     groupPicker
                     if store.channels.isEmpty && store.loading {
                         SkeletonShelf(title: "Chaînes")
                     } else {
-                        channelGrid(shown, title: group == Self.all ? "Toutes les chaînes" : group)
+                        channelGrid(shown, title: group == Self.all ? allTitle : group)
                     }
                 }
             }
@@ -44,11 +55,15 @@ struct LiveTVView: View {
         }
         .ignoresSafeArea(edges: .top)
         .background(Theme.backdrop)
+        .onChange(of: store.country) { _, _ in group = Self.all }
+        .onReceive(NotificationCenter.default.publisher(for: .essaiLiveQuery)) { query = ($0.object as? String) ?? "" }
         .task(id: query) {
             // la frappe ne fige jamais l'interface : recherche hors du fil principal, annulée à chaque lettre
             let q = query, index = store.channelIndex
             guard !q.isEmpty else { results = []; return }
+            let t0 = ContinuousClock.now
             let found = await Task.detached(priority: .userInitiated) { index.search(q, kinds: [.live], limit: 300) }.value
+            Perf.log("recherche chaînes \(q.count) lettres, \(found.count) trouvées", since: t0)
             if !Task.isCancelled { results = found }
         }
     }
@@ -200,7 +215,12 @@ struct IPTVCatalogView: View {
     @State private var query = ""
     @State private var results: [VODItem] = []
 
-    private var items: [VODItem] { store.catalogItems.filter { $0.kind == kind } }
+    /// Le pays choisi ne filtre le catalogue que s'il y figure (sinon tout le catalogue).
+    private var countryApplies: Bool { store.country.map { c in store.vodCountries.contains { $0.code == c } } ?? false }
+    private var items: [VODItem] {
+        let apply = countryApplies
+        return store.catalogItems.filter { $0.kind == kind && (!apply || store.inCountry($0)) }
+    }
     private var categories: [String] {
         var seen = Set<String>(), out: [String] = []
         for v in items where seen.insert(v.category).inserted { out.append(v.category) }
@@ -226,11 +246,14 @@ struct IPTVCatalogView: View {
                         Text("Séries").tag(IPTVKind.series)
                     }
                     .pickerStyle(.segmented).labelsHidden().frame(width: 240).padding(.horizontal, Theme.margin)
+                    if !store.vodCountries.isEmpty {
+                        CountryBar(counts: store.vodCountries, total: store.vod.count, applies: countryApplies)
+                    }
                     if query.isEmpty {
                         categoryPicker
                         grid(shown)
                     } else {
-                        grid(results)
+                        grid(countryApplies ? results.filter(store.inCountry) : results)
                     }
                     if items.isEmpty && !store.loading {
                         Text(kind == .movie ? "Pas de films dans tes playlists." : "Pas de séries dans tes playlists.")
@@ -243,6 +266,7 @@ struct IPTVCatalogView: View {
         .ignoresSafeArea(edges: .top)
         .background(Theme.backdrop)
         .onChange(of: kind) { _, _ in category = LiveTVView.all }
+        .onChange(of: store.country) { _, _ in category = LiveTVView.all }
         .task(id: "\(query)|\(kind.rawValue)") {
             let q = query, index = store.vodIndex, k = kind
             guard !q.isEmpty else { results = []; return }
@@ -555,5 +579,50 @@ struct ChannelLogo: View {
             if let hit = RemoteImageLoader.shared.cached(url) { image = hit; return }
             image = await RemoteImageLoader.shared.image(url)
         }
+    }
+}
+
+/// Barre des pays : drapeau, nom, nombre ; « Tous » d'abord, pays épinglés en tête (clic droit).
+struct CountryBar: View {
+    @ObservedObject private var store = IPTVStore.shared
+    let counts: [IPTVStore.CountryCount]
+    let total: Int
+    /// Faux quand le pays choisi n'existe pas ici (le catalogue montre alors tout).
+    var applies = true
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                chip(flag: "🌐", label: "Tous", count: total, selected: store.country == nil || !applies) { store.country = nil }
+                Divider().frame(height: 18).padding(.horizontal, 2)
+                ForEach(counts) { c in
+                    chip(flag: c.flag, label: c.label, count: c.count, selected: applies && store.country == c.code,
+                         pinned: store.favoriteCountries.contains(c.code)) { store.country = c.code }
+                        .contextMenu {
+                            Button(store.favoriteCountries.contains(c.code) ? "Ne plus épingler en tête" : "Épingler en tête") {
+                                store.toggleFavoriteCountry(c.code)
+                            }
+                        }
+                        .help("Clic droit : épingler ce pays en tête")
+                }
+            }
+            .padding(.horizontal, Theme.margin)
+        }
+    }
+
+    private func chip(flag: String, label: String, count: Int, selected: Bool, pinned: Bool = false,
+                      action: @escaping () -> Void) -> some View {
+        Button { withAnimation(.easeOut(duration: 0.15)) { action() } } label: {
+            HStack(spacing: 6) {
+                if pinned { Image(systemName: "pin.fill").font(.system(size: 9)).opacity(0.7) }
+                Text(flag).font(.system(size: 14))
+                Text(label).font(.system(size: 13, weight: selected ? .semibold : .medium)).lineLimit(1)
+                Text(count.formatted()).font(.system(size: 11, weight: .medium).monospacedDigit()).opacity(0.55)
+            }
+            .padding(.horizontal, 12).padding(.vertical, 7)
+            .background(selected ? Color.white.opacity(0.92) : Color.white.opacity(0.08), in: Capsule())
+            .foregroundStyle(selected ? Color.black : Color.white)
+        }
+        .buttonStyle(.plain)
     }
 }

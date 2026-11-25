@@ -124,7 +124,7 @@ extension PlayerController {
         guard let cur = queue[index].live?.entry else { return }
         let store = IPTVStore.shared
         let list = store.favoriteChannels.contains { $0.id == cur.id } ? store.favoriteChannels
-            : store.channels.sorted { ($0.number ?? Int.max, $0.name) < ($1.number ?? Int.max, $1.name) }
+            : store.channels.filter { store.inCountry($0) || $0.id == cur.id }.sorted { ($0.number ?? Int.max, $0.name) < ($1.number ?? Int.max, $1.name) }
         guard !list.isEmpty else { return }
         let i = list.firstIndex { $0.id == cur.id } ?? 0
         Self.playLive(list[(i + delta + list.count) % list.count])

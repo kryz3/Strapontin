@@ -40,6 +40,60 @@ final class IPTVStore: ObservableObject {
 
     var configured: Bool { !playlists.isEmpty }
 
+    // MARK: pays
+
+    /// Pays présents, avec leur nombre de chaînes / titres ; « » = sans pays reconnu.
+    @Published private(set) var channelCountries: [CountryCount] = []
+    @Published private(set) var vodCountries: [CountryCount] = []
+    private(set) var countryOfChannel: [String: String] = [:]
+    private(set) var countryOfVOD: [String: String] = [:]
+    /// Pays choisi dans « En direct » et le catalogue (nil = tous).
+    @Published var country: String? {
+        didSet { UserDefaults.standard.set(country ?? "*", forKey: "iptvCountry") }
+    }
+    @Published private(set) var favoriteCountries: [String] = UserDefaults.standard.stringArray(forKey: "iptvFavoriteCountries") ?? []
+
+    struct CountryCount: Hashable, Identifiable {
+        var code: String
+        var count: Int
+        var id: String { code }
+        var label: String { code.isEmpty ? "Autres" : IPTVCountry.label(code) }
+        var flag: String { code.isEmpty ? "🌐" : IPTVCountry.flag(code) }
+    }
+
+    func countryCode(of e: IPTVEntry) -> String { countryOfChannel[e.id] ?? "" }
+    func countryCode(of v: VODItem) -> String { countryOfVOD[v.id] ?? "" }
+    func inCountry(_ e: IPTVEntry) -> Bool { country == nil || countryCode(of: e) == country }
+    func inCountry(_ v: VODItem) -> Bool { country == nil || countryCode(of: v) == country }
+
+    func toggleFavoriteCountry(_ code: String) {
+        if let i = favoriteCountries.firstIndex(of: code) { favoriteCountries.remove(at: i) } else { favoriteCountries.append(code) }
+        UserDefaults.standard.set(favoriteCountries, forKey: "iptvFavoriteCountries")
+        channelCountries = ordered(channelCountries)
+        vodCountries = ordered(vodCountries)
+    }
+
+    /// Pays favoris d'abord, puis par nombre de chaînes ; « Autres » à la fin.
+    private func ordered(_ list: [CountryCount]) -> [CountryCount] {
+        let fav = favoriteCountries
+        return list.sorted { a, b in
+            let fa = fav.firstIndex(of: a.code) ?? Int.max, fb = fav.firstIndex(of: b.code) ?? Int.max
+            if fa != fb { return fa < fb }
+            if a.code.isEmpty != b.code.isEmpty { return b.code.isEmpty }
+            return a.count != b.count ? a.count > b.count : a.label < b.label
+        }
+    }
+
+    /// Choix de départ : celui d'avant, sinon la France si la playlist en a.
+    private func restoreCountry() {
+        let saved = UserDefaults.standard.string(forKey: "iptvCountry")
+        let codes = Set(channelCountries.map(\.code))
+        if saved == "*" { country = nil }
+        else if let saved, codes.contains(saved) || vodCountries.contains(where: { $0.code == saved }) { country = saved }
+        else if saved == nil, codes.contains("FR") { country = "FR" }
+        else if let c = country, !codes.contains(c), !vodCountries.contains(where: { $0.code == c }) { country = nil }
+    }
+
     private let dir: URL
     private let cacheDir: URL
     private var configURL: URL { dir.appendingPathComponent("iptv.json") }
@@ -136,7 +190,28 @@ final class IPTVStore: ObservableObject {
                                     number: nil, kind: $0.kind, playlist: "") }
         Task.detached(priority: .userInitiated) {
             let a = IPTVSearchIndex(ch), b = IPTVSearchIndex(v)
-            await MainActor.run { self.channelIndex = a; self.vodIndex = b; self.objectWillChange.send() }
+            var cc: [String: String] = [:], vc: [String: String] = [:]
+            var cn: [String: Int] = [:], vn: [String: Int] = [:]
+            for e in ch {
+                let c = e.country ?? IPTVCountry.detect(group: e.group, name: e.name, tvgId: e.tvgId) ?? ""
+                cc[e.id] = c; cn[c, default: 0] += 1
+            }
+            for e in v {
+                let c = IPTVCountry.detect(group: e.group, name: e.name) ?? ""
+                vc[e.id] = c; vn[c, default: 0] += 1
+            }
+            let chMap = cc, vMap = vc
+            let chCounts = cn.map { CountryCount(code: $0.key, count: $0.value) }
+            let vCounts = vn.map { CountryCount(code: $0.key, count: $0.value) }
+            await MainActor.run {
+                self.channelIndex = a; self.vodIndex = b
+                self.countryOfChannel = chMap; self.countryOfVOD = vMap
+                // un seul « Autres » sans aucun pays reconnu : pas de barre de pays
+                self.channelCountries = chCounts.contains(where: { !$0.code.isEmpty }) ? self.ordered(chCounts) : []
+                self.vodCountries = vCounts.contains(where: { !$0.code.isEmpty }) ? self.ordered(vCounts) : []
+                self.restoreCountry()
+                self.objectWillChange.send()
+            }
         }
     }
 
