@@ -535,13 +535,16 @@ struct ChannelLogo: View {
     let logo: String?
     let name: String
     var fontSize: CGFloat = 13
+    /// Taille fixe, et rien du tout (pas même la place) si l'image ne vient pas : le nom est déjà écrit à côté.
+    var collapsedSize: CGSize?
     @State private var image: NSImage?
 
     var body: some View {
         ZStack {
             if let image {
                 Image(nsImage: image).resizable().aspectRatio(contentMode: .fit)
-            } else {
+                    .frame(width: collapsedSize?.width, height: collapsedSize?.height)
+            } else if collapsedSize == nil {
                 Text(name).font(.system(size: fontSize, weight: .bold)).foregroundStyle(.white.opacity(0.85))
                     .multilineTextAlignment(.center).lineLimit(2).minimumScaleFactor(0.6)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)

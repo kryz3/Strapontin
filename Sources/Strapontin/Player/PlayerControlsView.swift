@@ -166,7 +166,7 @@ struct PlayerControlsView: View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .center, spacing: 14) {
                 if live.logo != nil {
-                    ChannelLogo(logo: live.logo, name: String(live.name.prefix(14)), fontSize: 11).frame(width: 64, height: 40)
+                    ChannelLogo(logo: live.logo, name: live.name, collapsedSize: CGSize(width: 64, height: 40))
                 }
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 8) {
