@@ -205,13 +205,17 @@ final class TrackerModel: ObservableObject {
             : try await t.searchTV(title: media.originalTitle ?? media.title, otherTitles: [media.title], season: season,
                                    episode: episode, imdbId: media.imdbId, tvdbId: media.tvdbId)
         let f = Follow(media: media)
+        // une série suivie peut avoir sa propre qualité ; une série commencée garde celle de ses épisodes
+        let own = follows.first { $0.id == media.key }?.quality
+        let seriesPrefs = prefs.overriding(own)
+        let style = media.kind == .tv && own == nil ? styles(for: [media.key])[media.key] : nil
         let ranked = items.compactMap { it -> RankedRelease? in
             let info = ReleaseInfo.parse(it.releaseName)
             // la recherche par titre ramène parfois d'autres œuvres : on ne garde que celle-ci
             guard AutoGrab.matches(it, f) else { return nil }
             if media.kind == .tv, let season, info.season != season { return nil }
             if media.kind == .tv, let season, let episode, !info.isRelease(season: season, episode: episode) { return nil }
-            return RankedRelease(item: it, info: info, score: ReleasePicker.score(it, info, prefs: prefs))
+            return RankedRelease(item: it, info: info, score: ReleasePicker.score(it, info, prefs: seriesPrefs, style: style))
         }
         .sorted(by: RankedRelease.better)
         if media.kind == .movie { noteVersions(ranked.count, for: media.key) }
@@ -357,6 +361,25 @@ final class TrackerModel: ObservableObject {
 
     func isFollowed(_ m: Media) -> Bool { follows.contains { $0.id == m.key } }
 
+    /// Qualité propre à une série suivie (nil = celle des réglages).
+    func quality(for key: String) -> QualityChoice? { follows.first { $0.id == key }?.quality }
+    func setQuality(_ q: QualityChoice?, for key: String) {
+        guard let i = follows.firstIndex(where: { $0.id == key }) else { return }
+        follows[i].quality = q
+        saveState()
+    }
+
+    /// Qualité et source des épisodes déjà dans la bibliothèque, par fiche.
+    func styles(for keys: [String]) -> [String: SeriesStyle] {
+        let files = LibraryStore.shared.files
+        var out: [String: SeriesStyle] = [:]
+        for k in Set(keys) {
+            let names = files.filter { $0.mediaKey == k && $0.isEpisode }.map(\.fileName)
+            if let st = SeriesStyle.from(names: names) { out[k] = st }
+        }
+        return out
+    }
+
     /// backfill : cherche tout de suite (film, ou toutes les saisons manquantes d'une série).
     /// Sans backfill, une série ne prend que ce qui sort, à partir de la dernière saison qu'on a sur le disque.
     func follow(_ m: Media, backfill doBackfill: Bool) {
@@ -433,7 +456,7 @@ final class TrackerModel: ObservableObject {
             }
         }
         let decisions = AutoGrab.decide(items: items, follows: follows, owned: owned, ownedMovies: ownedMovies,
-                                        history: history, prefs: prefs)
+                                        history: history, prefs: prefs, styles: styles(for: follows.map(\.id)))
         for dec in decisions {
             // pris à la main pendant ce passage
             if dec.follow.kind == .tv, let s = dec.info.season, let e = dec.info.episode,

@@ -112,6 +112,9 @@ final class EssaiHarness: ObservableObject {
                 TrackerModel.shared.follow(m, backfill: false)
                 Task { await TrackerModel.shared.checkNew() }
             }
+        case "qualite":   // qualite:<clé de fiche>|<choix> : comme le menu de la cloche
+            let p = arg.split(separator: "|").map(String.init)
+            if p.count == 2 { TrackerModel.shared.setQuality(QualityChoice(rawValue: p[1]), for: p[0]) }
         case "lire", "reprendre":
             if let item = LibraryStore.shared.items.first(where: { i in i.files.contains { $0.fileName == arg } }),
                let f = item.files.first(where: { $0.fileName == arg }) {

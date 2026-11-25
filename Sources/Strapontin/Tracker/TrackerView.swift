@@ -228,9 +228,6 @@ struct TrackerSettings: View {
                 Stepper("Vérifier toutes les \(model.checkMinutes) min", value: $model.checkMinutes, in: 5...240, step: 5)
             }
             Section("Versions préférées") {
-                Picker("Résolution", selection: $model.prefs.resolution) {
-                    Text("2160p (4K)").tag(2160); Text("1080p").tag(1080); Text("720p").tag(720)
-                }
                 Picker("Langue", selection: Binding(get: { model.prefs.languages.first ?? .multi },
                                                     set: { l in model.prefs.languages = [l] + ReleaseLanguage.allCases.filter { $0 != l && $0 != .vo } })) {
                     ForEach(ReleaseLanguage.allCases.filter { $0 != .vo }, id: \.self) { Text($0.rawValue).tag($0) }

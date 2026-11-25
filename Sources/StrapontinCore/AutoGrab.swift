@@ -14,6 +14,8 @@ public struct Follow: Codable, Identifiable, Hashable, Sendable {
     /// Séries : on ne prend que les épisodes à partir de cette saison (les nouveautés, pas tout l'historique).
     public var fromSeason: Int
     public var added: Date
+    /// Qualité propre à ce suivi (nil = celle des réglages).
+    public var quality: QualityChoice?
 
     public init(media: Media, fromSeason: Int = 1) {
         kind = media.kind; tmdbId = media.tmdbId; imdbId = media.imdbId; tvdbId = media.tvdbId
@@ -53,7 +55,7 @@ public enum AutoGrab {
     /// - ownedMovies : fiches de films déjà présentes
     public static func decide(items: [TorznabItem], follows: [Follow], owned: [String: Set<EpisodeKey>],
                               ownedMovies: Set<String>, history: [GrabRecord],
-                              prefs: GrabPreferences) -> [GrabDecision] {
+                              prefs globalPrefs: GrabPreferences, styles: [String: SeriesStyle] = [:]) -> [GrabDecision] {
         let grabbedHashes = Set(history.compactMap { $0.infoHash?.lowercased() })
         let candidates = items.filter { !grabbedHashes.contains(($0.infoHash ?? "").lowercased()) }
         var out: [GrabDecision] = []
@@ -61,11 +63,14 @@ public enum AutoGrab {
         for f in follows {
             let mine = candidates.filter { matches($0, f) }
             guard !mine.isEmpty else { continue }
+            let prefs = globalPrefs.overriding(f.quality)
+            // une qualité choisie pour cette série passe avant celle de ses épisodes déjà là
+            let style = f.quality == nil ? styles[f.id] : nil
 
             switch f.kind {
             case .movie:
                 if ownedMovies.contains(f.id) || history.contains(where: { $0.followId == f.id }) { continue }
-                if let b = ReleasePicker.best(mine, prefs: prefs, where: { $0.season == nil && yearOK($0.year, f.year) }) {
+                if let b = ReleasePicker.best(mine, prefs: prefs, style: style, where: { $0.season == nil && yearOK($0.year, f.year) }) {
                     out.append(GrabDecision(follow: f, item: b.0, info: b.1))
                 }
 
@@ -87,7 +92,7 @@ public enum AutoGrab {
                 })
                 var taken = Set<EpisodeKey>()
                 for k in wanted.sorted() where !taken.contains(k) {
-                    if let b = ReleasePicker.best(mine, prefs: prefs, where: { r in
+                    if let b = ReleasePicker.best(mine, prefs: prefs, style: style, where: { r in
                         r.season == k.season && r.episode == k.episode
                             // pas un groupe (E03E04) dont un épisode est déjà là ou en route
                             && (r.episodes ?? k.episode...k.episode).allSatisfy { !have.contains(EpisodeKey(k.season, $0)) }
@@ -104,7 +109,7 @@ public enum AutoGrab {
                     return s
                 })
                 for s in packSeasons.sorted() {
-                    if let b = ReleasePicker.best(mine, prefs: prefs, where: { $0.isSeasonPack && $0.season == s }) {
+                    if let b = ReleasePicker.best(mine, prefs: prefs, style: style, where: { $0.isSeasonPack && $0.season == s }) {
                         out.append(GrabDecision(follow: f, item: b.0, info: b.1))
                     }
                 }

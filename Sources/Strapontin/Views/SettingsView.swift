@@ -131,6 +131,7 @@ private struct QbitSettings: View {
     /// Onglet « Téléchargements » : choix du moteur ; ces champs ne servent que pour « Mon qBittorrent ».
     var body: some View {
         EngineSettings {
+            QualitySection()
             Section {
                 Toggle("Brancher qBittorrent", isOn: $settings.qbitEnabled)
                 TextField("Adresse", text: $settings.qbitURL)
@@ -159,6 +160,29 @@ private struct QbitSettings: View {
         // le client du moteur est gardé en cache : on le recrée avec les nouveaux réglages
         .onChange(of: "\(settings.qbitEnabled)|\(settings.qbitURL)|\(settings.qbitUser)|\(settings.qbitPassword)") { _, _ in
             TorrentEngine.shared.reset()
+        }
+    }
+}
+
+/// Qualité des téléchargements : un réglage global simple, que chaque série suivie peut changer depuis sa fiche.
+struct QualitySection: View {
+    @ObservedObject private var tracker = TrackerModel.shared
+
+    var body: some View {
+        Section {
+            Picker("Qualité préférée", selection: $tracker.prefs.quality) {
+                ForEach(QualityChoice.allCases) { Text($0.rawValue).tag($0) }
+            }
+            Toggle("Garder la qualité et la source des épisodes déjà téléchargés", isOn: $tracker.prefs.matchExisting)
+            Picker("Taille maximale d'un épisode", selection: $tracker.prefs.maxEpisodeGB) {
+                Text("Sans limite").tag(0.0)
+                ForEach([1.0, 2.0, 4.0, 8.0], id: \.self) { Text("\(Int($0)) Go").tag($0) }
+            }
+        } header: {
+            Text("Qualité")
+        } footer: {
+            Text("Pour les téléchargements et le suivi automatique. Une série déjà commencée continue dans la même qualité (1080p WEB, 4K BluRay…) ; chaque série suivie peut avoir sa propre qualité, depuis la cloche de sa fiche. « 4K si disponible » prend du 1080p quand il n'y a pas de 4K.")
+                .foregroundStyle(.secondary)
         }
     }
 }

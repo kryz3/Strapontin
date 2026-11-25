@@ -128,8 +128,22 @@ struct SeriesFicheView: View {
     @ViewBuilder
     private func followButton(_ m: Media) -> some View {
         if tracker.isFollowed(m) {
-            Button { tracker.unfollow(m.key) } label: { Image(systemName: "bell.fill").font(.system(size: 15, weight: .bold)) }
-                .buttonStyle(CircleButtonStyle()).help("Suivi : touche pour ne plus suivre")
+            // suivie : qualité propre à la série, ou arrêter le suivi
+            Menu {
+                Picker("Qualité des nouveaux épisodes", selection: Binding(get: { tracker.quality(for: m.key) },
+                                                                          set: { tracker.setQuality($0, for: m.key) })) {
+                    Text("Comme dans les réglages (\(tracker.prefs.quality.rawValue))").tag(QualityChoice?.none)
+                    ForEach(QualityChoice.allCases) { Text($0.rawValue).tag(QualityChoice?.some($0)) }
+                }
+                Divider()
+                Button("Ne plus suivre") { tracker.unfollow(m.key) }
+            } label: {
+                Image(systemName: "bell.fill").font(.system(size: 15, weight: .bold)).foregroundStyle(.white)
+                    .frame(width: 42, height: 42).background(.ultraThinMaterial, in: Circle())
+                    .overlay(Circle().stroke(.white.opacity(0.15)))
+            }
+            .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
+            .help("Suivie : les nouveaux épisodes arrivent tout seuls")
         } else {
             Menu {
                 Button("Suivre les nouveaux épisodes") { tracker.follow(m, backfill: false) }
