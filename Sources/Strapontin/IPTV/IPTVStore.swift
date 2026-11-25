@@ -297,7 +297,15 @@ final class IPTVStore: ObservableObject {
             case .notConnectedToInternet, .timedOut, .cannotConnectToHost, .cannotFindHost, .dnsLookupFailed, .networkConnectionLost,
                  .secureConnectionFailed, .cannotLoadFromNetwork, .internationalRoamingOff:
                 return "serveur injoignable depuis ce réseau (bloqué par la connexion, ou serveur hors ligne). Réessaie plus tard ou sur une autre connexion."
-            default: return "chargement impossible (\(u.localizedDescription))."
+            case .appTransportSecurityRequiresSecureConnection, .serverCertificateUntrusted, .serverCertificateHasBadDate,
+                 .serverCertificateNotYetValid, .serverCertificateHasUnknownRoot, .clientCertificateRejected:
+                return "connexion non sécurisée refusée (certificat ou http). Mets à jour Strapontin, ou essaie l'adresse en https."
+            case .userAuthenticationRequired, .userCancelledAuthentication:
+                return "identifiants refusés par le serveur."
+            case .badURL, .unsupportedURL: return "adresse invalide : vérifie le serveur saisi."
+            case .badServerResponse, .cannotParseResponse, .zeroByteResource:
+                return "le serveur a répondu quelque chose d'illisible (identifiants refusés ou abonnement expiré ?)."
+            default: return "chargement impossible (erreur réseau \(u.code.rawValue))."
             }
         }
         let ns = error as NSError

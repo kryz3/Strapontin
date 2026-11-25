@@ -23,6 +23,8 @@
     <key>SUPublicEDKey</key><string>RFxx2uLBwpfYVNS/ImeCHxrPVEGwxrZCqafnHZajjvU=</string>
     <key>SUEnableAutomaticChecks</key><true/>
     <key>NSAppTransportSecurity</key>
-    <dict><key>NSAllowsLocalNetworking</key><true/></dict>
+    <!-- les serveurs IPTV sont ceux que l'utilisateur saisit, souvent en http simple : on ne peut pas les lister.
+         TMDb, GitHub et les mises à jour restent en https dans le code. -->
+    <dict><key>NSAllowsLocalNetworking</key><true/><key>NSAllowsArbitraryLoads</key><true/></dict>
 </dict>
 </plist>
