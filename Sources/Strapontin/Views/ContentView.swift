@@ -45,8 +45,6 @@ struct ContentView: View {
     @State private var tab: TopTab = .home
     @State private var search = ""
     @State private var path = NavigationPath()
-    /// La barre s'efface quand on descend dans une page et revient dès qu'on remonte.
-    @State private var barHidden = false
     @ObservedObject private var downloads = DownloadsModel.shared
     @ObservedObject private var tracker = TrackerModel.shared
 
@@ -63,34 +61,35 @@ struct ContentView: View {
                         .toolbarBackground(.hidden, for: .windowToolbar)
                         .overlay(alignment: .top) { TopScrim() }
                         .withoutScrollEdgeBand()
+                        // la barre d'onglets reste là sur toutes les pages, fiches comprises
+                        .toolbar {
+                            ToolbarItem(placement: .principal) {
+                                TopBar(tab: $tab, downloading: downloadingCount, showIndexer: tracker.configured,
+                                       open: { path = NavigationPath(); path.append($0) })
+                            }
+                            .hidingSharedBackground()
+                        }
                 }
                 .toolbar {
                     ToolbarItem(placement: .principal) {
                         TopBar(tab: $tab, downloading: downloadingCount, showIndexer: tracker.configured,
                                open: { path = NavigationPath(); path.append($0) })
-                            // s'efface en douceur, en remontant un peu, comme sur l'Apple TV
-                            .opacity(barHidden ? 0 : 1)
-                            .offset(y: barHidden ? -8 : 0)
-                            .scaleEffect(barHidden ? 0.96 : 1)
-                            .allowsHitTesting(!barHidden)
-                            .animation(.spring(response: 0.35, dampingFraction: 0.9), value: barHidden)
                     }
                     .hidingSharedBackground()
                 }
                 .toolbarBackground(.hidden, for: .windowToolbar)
         }
-        .background(ScrollDirectionWatcher { down in if barHidden != down { barHidden = down } })
+        // barre fixe : elle reste visible pendant le défilement
         // ⌘F : la recherche, d'où qu'on soit
         .background(Button("") { path = NavigationPath(); tab = .search; SearchFocus.request() }
             .keyboardShortcut("f", modifiers: .command).hidden())
-        .onChange(of: tab) { _, _ in path = NavigationPath(); barHidden = false }
+        .onChange(of: tab) { _, _ in path = NavigationPath() }
         // menu Aller (⌘1 à ⌘4, Stockage, Indexeur)
         .onReceive(NotificationCenter.default.publisher(for: GoTo.name)) { n in
             guard let target = n.object as? String else { return }
             if let t = TopTab(rawValue: target) { path = NavigationPath(); tab = t; if t == .search { SearchFocus.request() } }
             else { path = NavigationPath(); path.append(target) }
         }
-        .onChange(of: path) { _, _ in barHidden = false }
         .onChange(of: downloadingCount) { _, n in if n == 0 && tab == .downloads { tab = .home } }
         // .torrent ou magnet déposé sur la fenêtre : il apparaît dans la bibliothèque, avec sa fiche si on la trouve
         .onDrop(of: [.fileURL, .url, .text], isTargeted: nil) { DownloadsModel.shared.handleDrop($0) }
@@ -180,7 +179,7 @@ private struct TopBar: View {
     }
 
     private func item(_ t: TopTab, count: Int? = nil) -> some View {
-        Button { tab = t } label: {
+        Button { GoTo.open(t.rawValue) } label: {
             HStack(spacing: 5) {
                 Text(t.rawValue)
                 if let count {
@@ -201,7 +200,7 @@ private struct TopBar: View {
     }
 
     private func icon(_ name: String, _ t: TopTab, help: String) -> some View {
-        Button { tab = t } label: {
+        Button { GoTo.open(t.rawValue) } label: {
             Image(systemName: name).font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(tab == t ? Color.black : Color.white.opacity(0.85))
                 .frame(width: 30, height: 26)
@@ -211,33 +210,6 @@ private struct TopBar: View {
                 .contentShape(Capsule())
         }
         .buttonStyle(.plain).help(help)
-    }
-}
-
-/// Défilement vers le bas (contenu qui monte) : `true` ; vers le haut : `false`. Molette ou trackpad.
-private struct ScrollDirectionWatcher: NSViewRepresentable {
-    let onChange: (Bool) -> Void
-    func makeNSView(context: Context) -> NSView {
-        let v = NSView()
-        context.coordinator.view = v
-        context.coordinator.monitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak c = context.coordinator] e in
-            guard let c, e.window === c.view?.window, abs(e.scrollingDeltaY) > abs(e.scrollingDeltaX) else { return e }
-            c.accumulated += e.scrollingDeltaY
-            if c.accumulated < -40 { c.accumulated = 0; c.onChange(true) }
-            if c.accumulated > 20 { c.accumulated = 0; c.onChange(false) }
-            return e
-        }
-        context.coordinator.onChange = onChange
-        return v
-    }
-    func updateNSView(_ v: NSView, context: Context) { context.coordinator.onChange = onChange }
-    func makeCoordinator() -> Coordinator { Coordinator() }
-    final class Coordinator {
-        weak var view: NSView?
-        var monitor: Any?
-        var accumulated: CGFloat = 0
-        var onChange: (Bool) -> Void = { _ in }
-        deinit { if let monitor { NSEvent.removeMonitor(monitor) } }
     }
 }
 
