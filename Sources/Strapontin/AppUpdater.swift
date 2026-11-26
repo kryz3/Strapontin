@@ -27,6 +27,11 @@ final class AppUpdater: NSObject, ObservableObject, SPUUpdaterDelegate {
         let c = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: self, userDriverDelegate: nil)
         controller = c
         observation = c.updater.publisher(for: \.canCheckForUpdates).receive(on: RunLoop.main).sink { [weak self] in self?.canCheck = $0 }
+        // à chaque lancement, une vérification discrète (pas seulement une fois par jour) : la fenêtre n'apparaît
+        // que s'il y a une nouvelle version ; respecte « Rechercher automatiquement » s'il est décoché
+        if c.updater.automaticallyChecksForUpdates {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) { c.updater.checkForUpdatesInBackground() }
+        }
     }
 
     func checkForUpdates() { controller?.checkForUpdates(nil) }
