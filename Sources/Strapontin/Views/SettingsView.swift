@@ -25,8 +25,8 @@ struct SettingsView: View {
             MetadataSettings().tabItem { Label("Fiches", systemImage: "info.square") }.tag(SettingsTab.metadata.rawValue)
             PlaybackSettings().tabItem { Label("Lecture", systemImage: "play.rectangle") }.tag(SettingsTab.playback.rawValue)
             QbitSettings().tabItem { Label("Téléchargements", systemImage: "arrow.down.circle") }.tag(SettingsTab.downloads.rawValue)
-            TrackerSettings().tabItem { Label("Indexeur", systemImage: "antenna.radiowaves.left.and.right") }.tag(SettingsTab.indexer.rawValue)
-            IPTVSettings().tabItem { Label("IPTV", systemImage: "tv.and.mediabox") }.tag(SettingsTab.iptv.rawValue)
+            TrackerSettings().tabItem { Label("Recherche", systemImage: "antenna.radiowaves.left.and.right") }.tag(SettingsTab.indexer.rawValue)
+            IPTVSettings().tabItem { Label("TV et streaming", systemImage: "tv.and.mediabox") }.tag(SettingsTab.iptv.rawValue)
         }
         .frame(width: 560, height: 600)
     }

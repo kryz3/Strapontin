@@ -399,7 +399,7 @@ final class IPTVStore: ObservableObject {
             switch ns.code {
             case 401, 403: return "accès refusé par le serveur (identifiants, abonnement expiré, ou réseau bloqué)."
             case 404: return "adresse introuvable sur le serveur."
-            case 500...599: return "le serveur IPTV a un problème (\(ns.code)). Réessaie plus tard."
+            case 500...599: return "le serveur de streaming a un problème (\(ns.code)). Réessaie plus tard."
             default: return "le serveur a répondu \(ns.code)."
             }
         }

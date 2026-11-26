@@ -177,10 +177,10 @@ struct EpisodeView: View {
         case .upcoming:
             note(EpisodeText.date(info?.airDate).map { "Diffusion le \($0)" } ?? "Pas encore diffusé")
         case .unavailable:
-            note("Rien sur l'indexeur pour l'instant")
+            note("Rien à télécharger pour l'instant")
         case .unknown:
             if !tracker.configured {
-                SettingsButton(tab: .indexer) { SmallPill(title: "Brancher un indexeur pour télécharger", icon: "gearshape", filled: false) }.buttonStyle(.plain)
+                SettingsButton(tab: .indexer) { SmallPill(title: "Configurer les téléchargements", icon: "gearshape", filled: false) }.buttonStyle(.plain)
             } else if series.releaseErrors[current.season] != nil {
                 note("L'indexeur n'a pas pu être consulté")
             } else {

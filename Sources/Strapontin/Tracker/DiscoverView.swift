@@ -283,7 +283,7 @@ struct TMDbSearchSections: View {
                 TMDbShelf(title: title, results: results,
                           availability: availability.isEmpty ? nil : availability.merging(tracker.availabilityById) { _, f in f })
                 if checking {
-                    Label("Vérification sur l'indexeur…", systemImage: "antenna.radiowaves.left.and.right")
+                    Label("Recherche des versions à télécharger…", systemImage: "antenna.radiowaves.left.and.right")
                         .font(.system(size: 11)).foregroundStyle(.secondary)
                         .padding(.horizontal, Theme.margin).padding(.top, 6)
                 }
@@ -430,7 +430,7 @@ struct TMDbPosterCard: View {
                 .overlay(alignment: .topTrailing) {
                     if owned {
                         Image(systemName: "checkmark.circle.fill").font(.system(size: 18))
-                            .foregroundStyle(.white, Color.black.opacity(0.55)).padding(8).help("Déjà dans ta bibliothèque")
+                            .foregroundStyle(.white, Color.black.opacity(0.55)).padding(8).help("Téléchargé")
                     }
                 }
                 .overlay { DownloadOverlay(mediaKey: Media.key(result.kind, result.id)) }
@@ -456,7 +456,7 @@ struct TMDbPosterCard: View {
                         Badge(text: n > 0 ? "\(n) VERSION\(n > 1 ? "S" : "")" : "INDISPONIBLE",
                               color: n > 0 ? Theme.accent : .black.opacity(0.6))
                             .padding(8)
-                            .help(n > 0 ? "Disponible : ouvre la fiche pour télécharger" : "Pas encore sur l'indexeur (la fiche permet de suivre sa sortie)")
+                            .help(n > 0 ? "Disponible au téléchargement : ouvre la fiche" : "Pas encore disponible au téléchargement (la fiche permet de suivre sa sortie)")
                     }
                 }
                 .scaleEffect(hover ? 1.04 : 1)
@@ -592,7 +592,9 @@ struct PreviewDetailView: View {
     @ViewBuilder
     private func primaryButtons(_ m: Media) -> some View {
             // trois façons de regarder, selon ce qui est disponible : la bibliothèque, le streaming IPTV, le téléchargement
-            StreamButton(kind: kind, tmdbId: tmdbId, titles: [m.title, m.originalTitle ?? ""], year: m.year)
+            if kind == .movie, store.item(id: key) == nil {
+                PlaySourceButton(key: TitleKey(.movie, tmdbId), title: m.title, titles: [m.title, m.originalTitle ?? ""], year: m.year)
+            }
             if let item = store.item(id: key) {
                 // arrivé dans la bibliothèque (la page bascule aussi d'elle-même sur la fiche complète)
                 PlayPill(title: "Lire") { play(item, resume: false) }
@@ -609,12 +611,12 @@ struct PreviewDetailView: View {
                 DownloadPill(progress: nil, label: "Envoi au téléchargement…")
             } else if !tracker.configured {
                 SettingsButton(tab: .indexer) {
-                    Label("Brancher un indexeur pour télécharger", systemImage: "gearshape").font(.system(size: 15, weight: .semibold))
+                    Label("Configurer les téléchargements", systemImage: "gearshape").font(.system(size: 15, weight: .semibold))
                         .padding(.horizontal, 22).padding(.vertical, 11)
                         .background(.ultraThinMaterial, in: Capsule()).overlay(Capsule().stroke(.white.opacity(0.15)))
                 }
                 .buttonStyle(.plain)
-                .help("Renseigne ton indexeur dans Réglages › Indexeur")
+                .help("Réglages › Téléchargements : où chercher les versions à télécharger")
             } else if let best = versions.first(where: { $0.score != nil }) {
                 PlayPill(title: "Télécharger", icon: "arrow.down") {
                     tracker.grab(best, media: m)
@@ -672,14 +674,14 @@ struct PreviewDetailView: View {
                 if loadingVersions { ProgressView().controlSize(.small) }
                 Spacer()
                 // dépannage seulement : la fiche cherche déjà toute seule
-                NavigationLink(value: "tracker") { Text("Chercher autrement sur l'indexeur…").font(.system(size: 12)) }
+                NavigationLink(value: "tracker") { Text("Chercher d'autres versions…").font(.system(size: 12)) }
                     .buttonStyle(.link)
                     .simultaneousGesture(TapGesture().onEnded { tracker.searchContext = m })
             }
             if let versionsError {
                 Label(versionsError, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
             } else if !loadingVersions && versions.isEmpty {
-                Text("Rien sur l'indexeur pour l'instant. Active le suivi (cloche) pour le récupérer dès sa sortie.")
+                Text("Rien à télécharger pour l'instant. Active le suivi (cloche) pour le récupérer dès sa sortie.")
                     .foregroundStyle(.secondary)
             }
             VStack(spacing: 2) {
@@ -754,7 +756,7 @@ struct ReleaseRow: View {
         .help(blocked ?? (release.score == nil ? "Ne correspond pas à tes préférences (langue, qualité ou sources), mais tu peux la prendre quand même." : "Télécharger cette version"))
         .contextMenu {
             if !sent, blocked == nil { Button("Télécharger") { download() } }
-            if let u = release.item.detailsURL.flatMap(URL.init(string:)) { Link("Voir sur l'indexeur", destination: u) }
+            if let u = release.item.detailsURL.flatMap(URL.init(string:)) { Link("Voir la page de cette version", destination: u) }
         }
     }
 
@@ -813,7 +815,7 @@ struct TrackerResultsSheet: View {
                 Button("Fermer") { isPresented = false }.keyboardShortcut(.cancelAction)
             }
             if let e = tracker.error ?? tracker.grabErrors[media.key] { Label(e, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange) }
-            if !loading && versions.isEmpty { Text("Rien trouvé sur l'indexeur.").foregroundStyle(.secondary) }
+            if !loading && versions.isEmpty { Text("Aucune version à télécharger trouvée.").foregroundStyle(.secondary) }
             ScrollView {
                 VStack(spacing: 2) {
                     ForEach(Array(versions.enumerated()), id: \.element.id) { i, r in

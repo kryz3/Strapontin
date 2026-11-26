@@ -154,7 +154,7 @@ final class ForYouModel: ObservableObject {
                         tracker.grab(best, media: m)
                         downloadState[card.id] = "Ajouté aux téléchargements"
                     } else {
-                        downloadState[card.id] = versions.isEmpty ? "Rien sur l'indexeur" : "Aucune version selon tes réglages"
+                        downloadState[card.id] = versions.isEmpty ? "Rien à télécharger pour l'instant" : "Aucune version selon tes réglages"
                     }
                 }
             } catch {

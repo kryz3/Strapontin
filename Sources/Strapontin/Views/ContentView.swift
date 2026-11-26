@@ -185,7 +185,7 @@ private struct TopBar: View {
             .contextMenu {
                 Button("Historique") { open("history") }
                 Button("Stockage") { open("storage") }
-                if showIndexer { Button("Indexeur") { open("tracker") } }
+                if showIndexer { Button("Recherche de téléchargements") { open("tracker") } }
             }
         }
         .padding(3)
@@ -488,7 +488,7 @@ struct EmptyLibrary: View {
                     SettingsButton(tab: .library) { SmallPill(title: "Choisir d'autres dossiers…", icon: "folder.badge.plus", filled: false) }
                         .buttonStyle(.plain)
                     if !tracker.configured {
-                        SettingsButton(tab: .indexer) { SmallPill(title: "Brancher un indexeur…", icon: "antenna.radiowaves.left.and.right", filled: false) }
+                        SettingsButton(tab: .indexer) { SmallPill(title: "Configurer les téléchargements…", icon: "antenna.radiowaves.left.and.right", filled: false) }
                             .buttonStyle(.plain)
                     }
                 }

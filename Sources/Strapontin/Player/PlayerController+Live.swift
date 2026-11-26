@@ -214,43 +214,36 @@ extension PlayerController {
 // MARK: - Versions d'un film ou d'un épisode en streaming
 
 extension PlayerController {
-    /// Les versions du titre en cours (doublons du fournisseur : VF, VOSTFR, 4K…). Une seule : affichée pour information.
+    /// Les sources du titre en cours : fichier(s) téléchargé(s) et versions en streaming. Passer de l'une à l'autre
+    /// reprend au même endroit — le secours quand une source bugge. Une seule : affichée pour information.
     func loadVersions() async {
-        guard index < queue.count, let key = queue[index].progressKey, let t = Watch.title(fromStreamKey: key) else { return }
+        guard index < queue.count, queue[index].live == nil, let t = currentTitle else { return }
         let path = queue[index].path
-        var options: [VersionOption] = []
-        var current: String?
-        switch t.kind {
-        case .movie:
-            for r in IPTVVOD.find(.movie, tmdbId: t.tmdbId, titles: [queue[index].title], year: nil) {
-                guard let u = IPTVStore.shared.url(of: r) else { continue }
-                options.append(VersionOption(id: u, label: IPTVVOD.sourceLabel(r.name), detail: r.name))
-                if u == path { current = u }
-            }
-        case .tv:
-            guard let e = t.episode else { return }
-            let streams = SeriesStreams.of(t.tmdbId)
-            await streams.load(tmdbId: t.tmdbId, titles: [queue[index].title], year: nil)
-            for r in streams.refs {
-                guard let ep = await streams.episode(season: e.season, episode: e.episode, in: r) else { continue }
-                options.append(VersionOption(id: ep.url, label: IPTVVOD.sourceLabel(r.name), detail: r.name))
-                if ep.url == path { current = ep.url }
-            }
-        }
+        let title = SeriesModel.of(t.tmdbId).media?.title ?? queue[index].title
+        let list = await Sources.all(t, titles: [title], year: nil)
         guard index < queue.count, queue[index].path == path else { return }   // on a changé de titre entre-temps
-        // deux versions au libellé identique : le nom du fournisseur les distingue
-        let counts = Dictionary(grouping: options, by: \.label).mapValues(\.count)
-        model.versions = options.map { o in counts[o.label, default: 0] > 1 ? VersionOption(id: o.id, label: "\(o.label) — \(o.detail)", detail: o.detail) : o }
-        model.currentVersion = current ?? options.first?.id
+        sourceOptions = list
+        model.versions = list.map { VersionOption(id: $0.id, label: $0.label, detail: $0.label) }
+        model.currentVersion = list.first { o in
+            switch o.kind { case .file(let p): p == path; case .stream(let u): u == path }
+        }?.id
     }
 
     func selectVersion(_ id: String) {
-        guard index < queue.count, id != queue[index].path, model.versions.contains(where: { $0.id == id }) else { return }
+        guard index < queue.count, let o = sourceOptions.first(where: { $0.id == id }), let t = currentTitle else { return }
         let position = model.position
-        var item = queue[index]
-        item.path = id
-        item.start = position
+        var item: PlayItem
+        switch o.kind {
+        case .file(let p):
+            guard p != queue[index].path, let f = LibraryStore.shared.files.first(where: { $0.path == p }) else { return }
+            item = PlayItem(file: f, title: queue[index].title, resume: false)
+        case .stream(let u):
+            guard u != queue[index].path else { return }
+            item = PlayItem(stream: u, title: queue[index].title, key: t)
+        }
         // même titre, même position : seule la source change
+        saveProgress(finished: false)
+        item.start = position
         queue[index] = item
         model.currentVersion = id
         loadCurrent()

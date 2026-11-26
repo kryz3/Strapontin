@@ -176,17 +176,19 @@ struct LibraryItemButtons: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            if let r = item.resumeTarget {
+            // la meilleure source d'un clic, les autres (fichier, streaming) dans le menu à côté
+            if let m = item.media, let f = item.resumeTarget ?? item.nextUp ?? item.files.first, let k = Watch.key(of: f) {
+                PlaySourceButton(key: k, title: m.title, titles: [m.title, m.originalTitle ?? ""], year: m.year)
+            } else if let r = item.resumeTarget {
                 PlayPill(title: "Reprendre \(tag(r))") { play(item, resume: true) }
                     .help("Reprendre à \(formatTime(r.position))")
-                Button { play(item, resume: false) } label: { Image(systemName: "arrow.counterclockwise").font(.system(size: 15, weight: .bold)) }
-                    .buttonStyle(CircleButtonStyle())
-                    .help("Lire depuis le début")
             } else {
                 PlayPill(title: item.kind == .tv ? "Lire \(item.nextUp.map(tag) ?? "")" : "Lire") { play(item, resume: false) }
             }
-            if item.kind == .movie, let m = item.media {
-                StreamButton(kind: .movie, tmdbId: m.tmdbId, titles: [m.title, m.originalTitle ?? ""], year: m.year, libraryFile: item.files.first)
+            if item.resumeTarget != nil {
+                Button { play(item, resume: false) } label: { Image(systemName: "arrow.counterclockwise").font(.system(size: 15, weight: .bold)) }
+                    .buttonStyle(CircleButtonStyle())
+                    .help("Lire depuis le début")
             }
             Button { store.setWatched(item.files.map(\.path), !item.allWatched) } label: {
                 Image(systemName: item.allWatched ? "checkmark.circle.fill" : "checkmark.circle").font(.system(size: 15, weight: .bold))

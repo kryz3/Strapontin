@@ -407,7 +407,7 @@ struct ManualAddSheets: ViewModifier {
 
     private var magnetSheet: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Ajouter des liens magnet").font(.headline)
+            Text("Ajouter des liens de téléchargement").font(.headline)
             Text("Un lien par ligne. Le téléchargement apparaît dans la bibliothèque, avec sa fiche quand Strapontin la reconnaît.")
                 .font(.callout).foregroundStyle(.secondary)
             TextEditor(text: $magnetText).font(.system(.body, design: .monospaced)).frame(height: 120)

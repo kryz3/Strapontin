@@ -116,7 +116,7 @@ struct SeriesFicheView: View {
         }
         if !tracker.configured {
             SettingsButton(tab: .indexer) {
-                Label("Brancher un indexeur pour télécharger", systemImage: "gearshape").font(.system(size: 15, weight: .semibold))
+                Label("Configurer les téléchargements", systemImage: "gearshape").font(.system(size: 15, weight: .semibold))
                     .padding(.horizontal, 22).padding(.vertical, 11)
                     .background(.ultraThinMaterial, in: Capsule()).overlay(Capsule().stroke(.white.opacity(0.15)))
             }
@@ -197,7 +197,7 @@ struct SeriesFicheView: View {
             }
             if let e = series.releaseErrors[snap.season] {
                 HStack(spacing: 10) {
-                    Label("Indexeur : \(e)", systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange).lineLimit(2)
+                    Label("Recherche des versions : \(e)", systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange).lineLimit(2)
                     Button("Réessayer") { series.show(season: snap.season) }.buttonStyle(.link)
                 }
                 .font(.system(size: 13)).padding(.horizontal, Theme.margin)
@@ -243,12 +243,12 @@ struct SeriesFicheView: View {
                 }
                 if series.loadingReleases.contains(snap.season) { ProgressView().controlSize(.small) }
                 Spacer()
-                NavigationLink(value: "tracker") { Text("Chercher autrement sur l'indexeur…").font(.system(size: 12)) }
+                NavigationLink(value: "tracker") { Text("Chercher d'autres versions…").font(.system(size: 12)) }
                     .buttonStyle(.link)
                     .simultaneousGesture(TapGesture().onEnded { tracker.searchContext = m })
             }
             if series.releases[snap.season] != nil, snap.packs.isEmpty {
-                Text("Pas de saison complète sur l'indexeur.").foregroundStyle(.secondary)
+                Text("Pas de saison complète à télécharger.").foregroundStyle(.secondary)
             } else if snap.busy, !snap.packs.isEmpty {
                 Text("Cette saison télécharge déjà : la reprendre en entier ferait des doublons.")
                     .font(.system(size: 13)).foregroundStyle(.secondary)
@@ -357,9 +357,8 @@ struct EpisodeRow: View {
             .buttonStyle(.plain)
             VStack(alignment: .trailing, spacing: 8) {
                 trailing
-                if case .owned = status {} else if let v = SeriesStreams.of(series.tmdbId).episode(season: snap.season, episode: episode) {
-                    Button { playStream(v) } label: { SmallPill(title: streamTitle(v), icon: "play.tv", filled: false) }
-                        .buttonStyle(.plain).help("Regarder cet épisode en streaming (IPTV)")
+                if case .owned = status {} else if SeriesStreams.of(series.tmdbId).episode(season: snap.season, episode: episode) != nil {
+                    PlaySourceButton(key: titleKey, title: media.title, titles: [media.title, media.originalTitle ?? ""], year: media.year, compact: true)
                 }
             }
             .frame(width: 190, alignment: .trailing)
@@ -368,6 +367,14 @@ struct EpisodeRow: View {
         .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(.white.opacity(hover ? 0.07 : 0)))
         .onHover { h in withAnimation(.easeOut(duration: 0.15)) { hover = h } }
         .contextMenu {
+            let sources = Sources.now(titleKey, titles: [media.title, media.originalTitle ?? ""], year: media.year)
+            if !sources.isEmpty {
+                Section("Lire depuis") {
+                    ForEach(sources) { o in
+                        Button { Sources.play(o, key: titleKey, title: media.title) } label: { Label(o.label, systemImage: o.icon) }
+                    }
+                }
+            }
             let seen = watchPoint?.watched == true
             Button(seen ? "Marquer comme non vu" : "Marquer comme vu") { Watch.setWatched(titleKey, !seen) }
         }
@@ -420,12 +427,7 @@ struct EpisodeRow: View {
     @ViewBuilder private var trailing: some View {
         switch status {
         case .owned:
-            if let item, let f = file {
-                Button { play(item, from: f, resume: f.inProgress) } label: {
-                    SmallPill(title: f.inProgress ? "Reprendre" : "Lire", icon: "play.fill", filled: true)
-                }
-                .buttonStyle(.plain)
-            }
+            PlaySourceButton(key: titleKey, title: media.title, titles: [media.title, media.originalTitle ?? ""], year: media.year, compact: true)
         case .sending:
             quiet("Envoi…", busy: true)
         case .arriving:
@@ -465,7 +467,7 @@ struct EpisodeRow: View {
         case .upcoming:
             quiet(EpisodeText.date(series.info(snap.season, episode)?.airDate).map { "Diffusion le \($0)" } ?? "Pas encore diffusé")
         case .unavailable:
-            quiet("Rien sur l'indexeur")
+            quiet("Rien à télécharger")
         case .unknown:
             if !tracker.configured {
                 quiet("")

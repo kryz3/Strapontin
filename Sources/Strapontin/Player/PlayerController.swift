@@ -166,6 +166,8 @@ final class PlayerController: NSObject, NSWindowDelegate {
     var alternateIndex = 0
     var previousChannel: IPTVEntry?
     var liveNotice: String?
+    /// Sources du titre en cours (colonne « Source » du panneau Audio et sous-titres).
+    var sourceOptions: [SourceOption] = []
     var volumeTimer: Timer?
     var noticeTimer: Timer?
     var numberTimer: Timer?
@@ -378,7 +380,7 @@ final class PlayerController: NSObject, NSWindowDelegate {
         model.versions = []
         model.currentVersion = nil
         model.onlineSubs = .idle
-        if item.live == nil, item.progressKey != nil { Task { await loadVersions() } }
+        if item.live == nil { Task { await loadVersions() } }
         startThumbnails(item.path)
         let file = currentFile
         IntroAnalyzer.shared.playbackStarted(file)
@@ -717,7 +719,7 @@ final class PlayerController: NSObject, NSWindowDelegate {
         }
     }
 
-    private func saveProgress(finished: Bool = false) {
+    func saveProgress(finished: Bool = false) {
         guard !finishedCurrent, index < queue.count, model.position > 0 || finished else { return }
         if queue[index].live != nil { return }   // le direct n'a pas de progression
         if let key = queue[index].progressKey {

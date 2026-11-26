@@ -34,7 +34,9 @@ enum IPTVVOD {
                      libraryFile: MediaFile? = nil) {
         let store = IPTVStore.shared
         var start = 0.0
-        if let p = store.progress[progressKey], p[0] > 30, p[0] < p[1] * 0.95 { start = p[0] }
+        if let t = Watch.title(fromStreamKey: progressKey) {
+            start = Watch.resume(t)   // la position du titre, d'où qu'elle vienne
+        } else if let p = store.progress[progressKey], p[0] > 30, p[0] < p[1] * 0.95 { start = p[0] }
         if let f = libraryFile, f.inProgress, let t = f.lastPlayed,
            t > (store.progress[progressKey].flatMap { $0.count > 2 ? $0[2] : nil } ?? 0) {
             start = f.position
@@ -109,7 +111,7 @@ struct StreamBadge: View {
             Image(systemName: "play.tv.fill").font(.system(size: 10, weight: .bold)).foregroundStyle(.white)
                 .padding(5).background(.black.opacity(0.55), in: Circle())
                 .padding(8)
-                .help("À regarder en streaming (IPTV)")
+                .help("Disponible en streaming")
         }
     }
 }
@@ -123,7 +125,7 @@ struct IPTVTitleSearchSection: View {
     var body: some View {
         Group {
             if !found.isEmpty {
-                Shelf(title: "Autres titres IPTV") { ForEach(found) { VODCard(ref: $0) } }
+                Shelf(title: "Autres titres en streaming") { ForEach(found) { VODCard(ref: $0) } }
             }
         }
         .task(id: "\(query)|\(store.vodLookup.count)") {

@@ -428,11 +428,11 @@ struct TracksPanel: View {
             }
             if !versions.isEmpty {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(versions.count > 1 ? "VERSION" : "QUALITÉ").font(.system(size: 11, weight: .heavy)).foregroundStyle(.secondary)
+                    Text("SOURCE").font(.system(size: 11, weight: .heavy)).foregroundStyle(.secondary)
                         .padding(.horizontal, 10).padding(.bottom, 6)
                     if versions.count == 1 {
                         Text(versions[0].label).font(.system(size: 13)).padding(.horizontal, 10).padding(.vertical, 7)
-                        Text("Une seule version de ce titre chez ton fournisseur.").font(.system(size: 11)).foregroundStyle(.secondary)
+                        Text("Pas d'autre source pour ce titre.").font(.system(size: 11)).foregroundStyle(.secondary)
                             .padding(.horizontal, 10).fixedSize(horizontal: false, vertical: true)
                     } else {
                         ForEach(versions) { v in

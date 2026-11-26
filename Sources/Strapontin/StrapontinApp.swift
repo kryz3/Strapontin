@@ -115,7 +115,7 @@ struct StrapontinApp: App {
                 Divider()
                 Button("Historique") { GoTo.open("history") }.keyboardShortcut("y", modifiers: .command)
                 Button("Stockage") { GoTo.open("storage") }.keyboardShortcut("s", modifiers: [.command, .shift])
-                Button("Indexeur") { GoTo.open("tracker") }.keyboardShortcut("i", modifiers: [.command, .shift])
+                Button("Recherche de téléchargements") { GoTo.open("tracker") }.keyboardShortcut("i", modifiers: [.command, .shift])
             }
             CommandGroup(after: .newItem) {
                 Button("Rescanner la bibliothèque") { store.rescan(retryNotFound: true) }
@@ -124,7 +124,7 @@ struct StrapontinApp: App {
                 // ajout à la main (aussi : glisser-déposer sur la fenêtre) ; le téléchargement apparaît dans la bibliothèque
                 Button("Télécharger un fichier .torrent…") { DownloadsModel.shared.showTorrentImporter = true }
                     .keyboardShortcut("o", modifiers: .command)
-                Button("Télécharger un lien magnet…") { DownloadsModel.shared.showMagnetSheet = true }
+                Button("Télécharger depuis un lien…") { DownloadsModel.shared.showMagnetSheet = true }
                     .keyboardShortcut("o", modifiers: [.command, .shift])
             }
         }

@@ -148,7 +148,7 @@ struct ResultsTable: View {
         .contextMenu(forSelectionType: TorznabItem.ID.self) { ids in
             if let it = items.first(where: { ids.contains($0.id) }) {
                 Button("Télécharger") { download(it) }
-                if let u = it.detailsURL.flatMap(URL.init(string:)) { Link("Voir sur l'indexeur", destination: u) }
+                if let u = it.detailsURL.flatMap(URL.init(string:)) { Link("Voir la page de cette version", destination: u) }
             }
         } primaryAction: { ids in
             if let it = items.first(where: { ids.contains($0.id) }), !sent.contains(it.id) { download(it) }

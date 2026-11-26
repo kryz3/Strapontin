@@ -152,6 +152,18 @@ struct EpisodesPanel: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .contextMenu {
+            let k = TitleKey(.tv, series.tmdbId, EpisodeKey(shown, n))
+            let title = series.media?.title ?? ""
+            let sources = Sources.now(k, titles: [title], year: series.media?.year)
+            if !sources.isEmpty {
+                Section("Lire depuis") {
+                    ForEach(sources) { o in
+                        Button { actions.toggleEpisodes(); Sources.play(o, key: k, title: title) } label: { Label(o.label, systemImage: o.icon) }
+                    }
+                }
+            }
+        }
         .disabled(file == nil && stream == nil && !isActionable(status))
     }
 

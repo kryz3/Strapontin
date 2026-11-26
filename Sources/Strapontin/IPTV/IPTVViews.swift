@@ -339,8 +339,8 @@ struct IPTVSetupNotice: View {
     var body: some View {
         VStack(spacing: 12) {
             Image(systemName: "tv.and.mediabox").font(.system(size: 44, weight: .light)).foregroundStyle(Theme.accentText)
-            Text("Ajoute une playlist IPTV").font(.system(size: 22, weight: .bold))
-            Text("Colle l'adresse de ta playlist M3U (ou choisis un fichier) dans Réglages › IPTV. Les chaînes arrivent ici, les films et séries dans le Catalogue IPTV.")
+            Text("Ajoute ta TV en streaming").font(.system(size: 22, weight: .bold))
+            Text("Dans Réglages › TV et streaming, ajoute l'adresse de ta playlist ou ton compte (serveur, identifiant, mot de passe). Les chaînes arrivent ici ; les films et séries se regardent depuis leur fiche, « Lire · Streaming ».")
                 .foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: 480)
             SettingsButton(tab: .iptv) { SmallPill(title: "Ajouter une playlist", icon: "plus", filled: true) }.buttonStyle(.plain)
         }
@@ -527,7 +527,7 @@ struct IPTVSettings: View {
             } header: {
                 Text("Playlists")
             } footer: {
-                Text("Une adresse M3U / M3U8 ou un fichier. Les fournisseurs « Xtream Codes » (adresse en get.php?username=…) donnent aussi leur catalogue de films et séries. Les adresses et identifiants restent sur ce Mac, dans un fichier que toi seul peux lire.")
+                Text("L'adresse d'une playlist (.m3u) ou un fichier, ou bien un compte : serveur, identifiant et mot de passe donnés par ton fournisseur. Les chaînes vont dans « En direct » ; les films et séries s'ajoutent comme source « Streaming » sur leur fiche. Adresses et identifiants restent sur ce Mac, dans un fichier que toi seul peux lire.")
                     .foregroundStyle(.secondary)
             }
         }
@@ -582,8 +582,8 @@ private struct PlaylistEditor: View {
         Form {
             TextField("Nom", text: $playlist.name)
             Picker("Type", selection: $xtream) {
-                Text("Adresse M3U ou fichier").tag(false)
-                Text("Compte Xtream").tag(true)
+                Text("Adresse de la playlist ou fichier").tag(false)
+                Text("Compte (serveur et identifiants)").tag(true)
             }
             .pickerStyle(.segmented)
             if xtream {
@@ -592,7 +592,7 @@ private struct PlaylistEditor: View {
                 SecureField("Mot de passe", text: $password)
             } else {
             HStack {
-                TextField("Adresse M3U ou fichier", text: $playlist.source, prompt: Text("https://… ou ~/Documents/liste.m3u"))
+                TextField("Adresse de la playlist ou fichier", text: $playlist.source, prompt: Text("https://… ou ~/Documents/liste.m3u"))
                 Button("Fichier…") {
                     let panel = NSOpenPanel()
                     panel.allowedContentTypes = [.init(filenameExtension: "m3u")!, .init(filenameExtension: "m3u8")!]
@@ -600,9 +600,9 @@ private struct PlaylistEditor: View {
                 }
             }
             }
-            TextField("Guide XMLTV (facultatif)", text: $playlist.guide, prompt: Text("Sinon celui annoncé par la playlist"))
-            TextField("User-Agent (facultatif)", text: $playlist.userAgent, prompt: Text("Par défaut : \(LiveOptions.defaultUserAgent)"))
-            TextField("Referer (facultatif)", text: $playlist.referer)
+            TextField("Guide des programmes (facultatif)", text: $playlist.guide, prompt: Text("Sinon celui annoncé par la playlist"))
+            TextField("Avancé · nom de lecteur envoyé (facultatif)", text: $playlist.userAgent, prompt: Text("Par défaut : \(LiveOptions.defaultUserAgent)"))
+            TextField("Avancé · page d'origine (facultatif)", text: $playlist.referer)
             Stepper("Rafraîchir toutes les \(playlist.refreshHours) h", value: $playlist.refreshHours, in: 1...72)
             HStack {
                 Spacer()
