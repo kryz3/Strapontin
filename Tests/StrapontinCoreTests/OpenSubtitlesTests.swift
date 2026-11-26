@@ -16,3 +16,14 @@ final class OpenSubtitlesTests: XCTestCase {
         XCTAssertTrue(r[1].machineTranslated)
     }
 }
+
+final class ScrambleTests: XCTestCase {
+    /// Même brouillage que scripts/bundle.sh (XOR « strapontin » + base64), aller-retour avec une clé factice.
+    func testRoundTrip() {
+        let salt = Array("strapontin".utf8)
+        let scrambled = Data(Array("cle-factice-123".utf8).enumerated().map { $0.element ^ salt[$0.offset % salt.count] }).base64EncodedString()
+        let back = Data(base64Encoded: scrambled).map { d in String(bytes: d.enumerated().map { $0.element ^ salt[$0.offset % salt.count] }, encoding: .utf8) }
+        XCTAssertEqual(back, "cle-factice-123")
+        XCTAssertFalse(scrambled.contains("factice"))
+    }
+}

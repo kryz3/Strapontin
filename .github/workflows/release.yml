@@ -43,6 +43,7 @@ jobs:
       - name: Construire Strapontin.app
         env:
           TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
+          OPENSUBTITLES_API_KEY: ${{ secrets.OPENSUBTITLES_API_KEY }}
         run: ./scripts/bundle.sh
 
       - name: Vérifier l'app

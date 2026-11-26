@@ -48,7 +48,12 @@ pb() { /usr/libexec/PlistBuddy -c "$1" "$PLIST" >/dev/null; }
 [ -n "${STRAPONTIN_VERSION:-}" ] && pb "Set :CFBundleShortVersionString $STRAPONTIN_VERSION"
 [ -n "${STRAPONTIN_BUILD:-}" ] && pb "Set :CFBundleVersion $STRAPONTIN_BUILD"
 [ -n "${TMDB_API_KEY:-}" ] && pb "Add :StrapontinTMDbKey string $TMDB_API_KEY"
-[ -n "${OPENSUBTITLES_API_KEY:-}" ] && pb "Add :StrapontinOpenSubtitlesKey string $OPENSUBTITLES_API_KEY"
+# clé OpenSubtitles : brouillée (XOR + base64) pour ne pas apparaître telle quelle dans l'app ; passée par
+# l'environnement, jamais en argument de commande
+if [ -n "${OPENSUBTITLES_API_KEY:-}" ]; then
+  OSX="$(python3 -c 'import os,base64;k=os.environ["OPENSUBTITLES_API_KEY"].encode();s=b"strapontin";print(base64.b64encode(bytes(c^s[i%len(s)] for i,c in enumerate(k))).decode())')"
+  pb "Add :StrapontinOpenSubtitlesKeyX string $OSX"
+fi
 [ -n "${STRAPONTIN_FEED_URL:-}" ] && pb "Add :SUFeedURL string $STRAPONTIN_FEED_URL"
 if [ -n "${CI:-}${GITHUB_ACTIONS:-}" ]; then
   [ -n "${INDEXER_URL:-}${INDEXER_API_PATH:-}${INDEXER_API_KEY:-}" ] && echo "INDEXER_* ignorés en CI : une release publique ne contient pas d'indexeur" >&2

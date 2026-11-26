@@ -36,7 +36,7 @@ INDEXER_API_KEY=ma-cle-api-factice
 | Variable | Rôle |
 |---|---|
 | `TMDB_API_KEY` | clé TMDb : fiches, affiches, épisodes, Découvrir, recherche dans le catalogue |
-| `OPENSUBTITLES_API_KEY` | clé OpenSubtitles.com (gratuite, compte puis « API consumers ») : sous-titres en ligne dans le lecteur. Facultative : chacun peut aussi la saisir dans Réglages › Lecture |
+| `OPENSUBTITLES_API_KEY` | clé OpenSubtitles.com (gratuite, compte puis « API consumers ») : sous-titres en ligne dans le lecteur. Les releases publiques en ont une, fournie par le secret GitHub du même nom ; chacun peut mettre la sienne dans Réglages › Lecture (elle passe avant), par exemple si le quota du jour est atteint |
 | `INDEXER_URL` | adresse de base de l'indexeur (`https://…`) |
 | `INDEXER_API_PATH` | chemin de son API Torznab (souvent `/api`) ; l'app appelle `INDEXER_URL` + `INDEXER_API_PATH` |
 | `INDEXER_API_KEY` | ta clé API sur cet indexeur |
