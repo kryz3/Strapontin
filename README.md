@@ -48,8 +48,9 @@ documentation are in French.*
   réactions), calculé sur ton Mac. **Historique** (⌘Y), **Ma liste**, recherche par acteur.
 
 **Un titre, plusieurs sources**
-- Un film ou un épisode peut se lire depuis un fichier de la bibliothèque, en streaming IPTV ou après
-  téléchargement : la fiche propose ce qui est disponible (la meilleure source par défaut).
+- Un film ou un épisode peut se lire depuis un fichier de la bibliothèque, en streaming ou après téléchargement :
+  « Lire · Fichier ▾ » prend la meilleure source, le menu propose les autres, et la colonne « Source » du lecteur
+  permet d'en changer en pleine lecture, au même endroit.
 - Progression, « vu », Historique et « À suivre » sont ceux du titre, quelle que soit la source : on reprend un
   épisode en streaming là où on l'avait laissé en fichier, et l'épisode suivant peut venir d'une autre source.
 
@@ -67,8 +68,8 @@ documentation are in French.*
   fichier. Rendu `gpu-next` (Vulkan / MoltenVK), profil `high-quality`, mise à l'échelle `ewa_lanczossharp`.
 - Pistes audio et sous-titres (les `.srt` à côté du fichier sont chargés), passthrough vers un ampli
   (TrueHD/Atmos, DTS-HD), reprise là où tu t'étais arrêté.
-- **Sous-titres en ligne** (OpenSubtitles.com, clé gratuite) : recherche par film ou épisode, dans tes langues, en
-  un clic depuis le lecteur ; ou un fichier `.srt` à ajouter.
+- **Sous-titres en ligne** (OpenSubtitles.com) : recherche par film ou épisode, dans tes langues, en un clic depuis
+  le lecteur, sans rien configurer ; ou un fichier `.srt` à ajouter.
 - **Épisode suivant** dès le générique de fin, sans jamais couper une scène après le générique.
 - **Passer l'intro / le récap** : chapitres du fichier, sinon comparaison du son des épisodes d'une même saison,
   calculée sur ton Mac.

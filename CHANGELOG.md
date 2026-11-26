@@ -5,6 +5,19 @@ La section d'une version sert de notes à sa release GitHub.
 
 ## [Non publié]
 
+## [0.1.4] - 2026-11-26
+
+- **Choisir la source** : le bouton dit ce qui va se passer (« Lire · Fichier », « Reprendre · Streaming ») et
+  son menu ▾ propose toutes les sources d'un film ou d'un épisode (fichier téléchargé, versions en streaming).
+- **Changer de source en pleine lecture** : colonne « Source » dans Audio et sous-titres ; on reprend au même
+  endroit. Le secours quand un fichier bugge.
+- **Sous-titres en ligne sans configuration** : « Chercher en ligne… » dans le lecteur fonctionne d'emblée (clé
+  OpenSubtitles fournie avec l'app ; la tienne, dans les réglages, passe avant).
+- **Son** : l'icône montre l'état réel (coupé, volume) ; curseur toujours visible, molette et ↑ ↓.
+- **Mises à jour** : vérifiées discrètement à chaque lancement.
+- **Plus clair partout** : des mots simples à la place du jargon, les mêmes étiquettes sur les affiches
+  (Téléchargé, Disponible en streaming, Disponible au téléchargement), des écrans vides qui disent quoi faire.
+
 ## [0.1.3] - 2026-11-26
 
 **Nouveau**
