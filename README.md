@@ -44,12 +44,31 @@ documentation are in French.*
 - Séries épisode par épisode : image, date, durée et résumé de chaque épisode, une fiche par épisode avec
   précédent / suivant.
 - Découvrir : tendances et recherche dans tout le catalogue TMDb.
+- **Pour toi** (⌘4) : un fil de programmes choisis d'après tes goûts (bibliothèque, ce que tu regardes, Ma liste,
+  réactions), calculé sur ton Mac. **Historique** (⌘Y), **Ma liste**, recherche par acteur.
+
+**Un titre, plusieurs sources**
+- Un film ou un épisode peut se lire depuis un fichier de la bibliothèque, en streaming IPTV ou après
+  téléchargement : la fiche propose ce qui est disponible (la meilleure source par défaut).
+- Progression, « vu », Historique et « À suivre » sont ceux du titre, quelle que soit la source : on reprend un
+  épisode en streaming là où on l'avait laissé en fichier, et l'épisode suivant peut venir d'une autre source.
+
+**IPTV** (facultatif)
+- Playlists M3U / M3U8 (adresse ou fichier) et comptes **Xtream** (serveur, identifiant, mot de passe), gardés sur
+  ce Mac. Chargement progressif : les chaînes d'abord, l'index des films et séries ensuite, en fond.
+- **En direct** : chaînes rangées par pays et par thème, noms nettoyés (« FR| CANAL+ SPORT ᴴᴰ » → Canal+ Sport),
+  variantes HD / Full HD / 4K regroupées avec choix de la qualité, recherche tolérante, favoris, zapping ↑ ↓,
+  programme en cours ; lecteur qui se répare tout seul quand le flux fige ou coupe.
+- Films et séries du fournisseur : « Regarder en streaming » sur la fiche TMDb du titre, choix de la version (VF,
+  VOSTFR, 4K…).
 
 **Lecture**
 - libmpv, décodage matériel VideoToolbox quand il est fiable (`auto-safe`), sinon logiciel : c'est l'image du
   fichier. Rendu `gpu-next` (Vulkan / MoltenVK), profil `high-quality`, mise à l'échelle `ewa_lanczossharp`.
 - Pistes audio et sous-titres (les `.srt` à côté du fichier sont chargés), passthrough vers un ampli
   (TrueHD/Atmos, DTS-HD), reprise là où tu t'étais arrêté.
+- **Sous-titres en ligne** (OpenSubtitles.com, clé gratuite) : recherche par film ou épisode, dans tes langues, en
+  un clic depuis le lecteur ; ou un fichier `.srt` à ajouter.
 - **Épisode suivant** dès le générique de fin, sans jamais couper une scène après le générique.
 - **Passer l'intro / le récap** : chapitres du fichier, sinon comparaison du son des épisodes d'une même saison,
   calculée sur ton Mac.

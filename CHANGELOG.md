@@ -5,11 +5,21 @@ La section d'une version sert de notes à sa release GitHub.
 
 ## [Non publié]
 
-- « Pour toi » (⌘4) : un fil de programmes choisis d'après tes goûts, à faire défiler (molette, trackpad, ↑ ↓) :
-  grand visuel, affiche, infos, résumé, distribution cliquable, « Parce que tu as aimé … ». Actions : Télécharger,
-  Ma liste, J'aime, Déjà vu, Pas pour moi, Voir la fiche. Calculé sur le Mac, à partir de la bibliothèque, de ce qui
-  est regardé, de Ma liste et des réactions ; recommandations et découverte TMDb ; de la variété et un peu de découverte.
+## [0.1.3] - 2026-11-26
 
+**Nouveau**
+- **Pour toi** (⌘4) : un fil de programmes choisis d'après tes goûts, à faire défiler, avec affiche, résumé,
+  distribution et « Parce que tu as aimé… ». Calculé sur ton Mac.
+- **IPTV** : playlists M3U et comptes Xtream. Onglet **En direct** (chaînes par pays et par thème, noms nettoyés,
+  qualités regroupées, recherche, favoris, zapping, programme en cours) ; films et séries du fournisseur proposés
+  « en streaming » sur la fiche TMDb du titre, avec choix de la version.
+- **Un titre, plusieurs sources** : fichier, streaming ou téléchargement ; progression, « vu », Historique et
+  « À suivre » sont communs, et l'épisode suivant passe d'une source à l'autre.
+- **Sous-titres en ligne** (OpenSubtitles.com) depuis le lecteur, ou un fichier à ajouter.
+- Lecteur du direct qui se répare tout seul : reprise au bord du direct, réouverture, qualité plus basse, adresse
+  de secours ; pastille « Reconnexion… ».
+
+**Aussi**
 - Lecteur : bouton « Épisode précédent » (⇧N), désactivé au premier épisode, qui passe à la saison d'avant si besoin.
 - Lecteur : panneau « Épisodes » (E), façon Netflix : toute la saison par-dessus la vidéo, qui continue derrière,
   avec image, titre, durée, résumé, progression et disponibilité de chaque épisode ; un clic lit l'épisode ou lance
@@ -24,6 +34,10 @@ La section d'une version sert de notes à sa release GitHub.
 - Mini-lecteur (⇧P) : petite fenêtre toujours devant, dans un coin de l'écran.
 - Touches multimédia, Centre de contrôle et écran verrouillé : lecture/pause, ±10 s, épisode suivant/précédent.
 - Historique (⌘Y) : ce qui a été regardé, par jour, avec reprise et « marquer comme non vu ».
+
+**Amélioré**
+- Contrôle du son façon QuickTime : icône qui suit l'état réel (coupé, volume), curseur toujours visible.
+- Dégradé du lecteur sur toute la fenêtre ; images et noms des titres toujours tirés de TMDb.
 
 ## [0.1.2] - 2026-11-23
 
