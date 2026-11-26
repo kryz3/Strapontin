@@ -171,6 +171,8 @@ struct DetailView: View {
 struct LibraryItemButtons: View {
     let item: LibraryItem
     @EnvironmentObject var store: LibraryStore
+    @ObservedObject private var tracker = TrackerModel.shared
+    @State private var versionsFor: Media?
     @State private var showMatch = false
     @State private var deleteRequest: DeleteRequest?
 
@@ -185,18 +187,17 @@ struct LibraryItemButtons: View {
             } else {
                 PlayPill(title: item.kind == .tv ? "Lire \(item.nextUp.map(tag) ?? "")" : "Lire") { play(item, resume: false) }
             }
-            if item.resumeTarget != nil {
-                Button { play(item, resume: false) } label: { Image(systemName: "arrow.counterclockwise").font(.system(size: 15, weight: .bold)) }
-                    .buttonStyle(CircleButtonStyle())
-                    .help("Lire depuis le début")
-            }
-            Button { store.setWatched(item.files.map(\.path), !item.allWatched) } label: {
-                Image(systemName: item.allWatched ? "checkmark.circle.fill" : "checkmark.circle").font(.system(size: 15, weight: .bold))
-            }
-            .buttonStyle(CircleButtonStyle())
-            .help(item.allWatched ? "Marquer comme non vu" : "Marquer comme vu")
-            if let m = item.media { TrackerButtons(media: m) }
+            // façon Netflix : Lecture, Ma liste, et le reste dans ⋯
+            if let m = item.media { MyListButton(media: m) }
             Menu {
+                if item.resumeTarget != nil { Button("Lire depuis le début") { play(item, resume: false) } }
+                Button(item.allWatched ? "Marquer comme non vu" : "Marquer comme vu") { store.setWatched(item.files.map(\.path), !item.allWatched) }
+                if let m = item.media, tracker.configured {
+                    Divider()
+                    Button("Télécharger une autre version…") { versionsFor = m }
+                    if m.kind == .tv { Button("Télécharger les saisons manquantes") { tracker.unfollow(m.key); tracker.follow(m, backfill: true) } }
+                }
+                Divider()
                 Button("Corriger la fiche…") { showMatch = true }
                 if let imdb = item.media?.imdbId, let url = URL(string: "https://www.imdb.com/title/\(imdb)/") {
                     Link("Voir sur IMDb", destination: url)
@@ -223,6 +224,9 @@ struct LibraryItemButtons: View {
             // une seule feuille et une seule confirmation pour toute la rangée de boutons
             Color.clear
                 .sheet(isPresented: $showMatch) { MatchSheet(item: item) }
+                .sheet(item: $versionsFor) { m in
+                    TrackerResultsSheet(media: m, isPresented: Binding(get: { versionsFor != nil }, set: { if !$0 { versionsFor = nil } }))
+                }
                 .deleteConfirmation($deleteRequest)
         }
     }

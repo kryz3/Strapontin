@@ -106,10 +106,10 @@ struct StrapontinApp: App {
             // menu « Aller » : chaque page de la barre du haut, plus Stockage et Indexeur (sans bouton dédié)
             CommandMenu("Aller") {
                 Button("Accueil") { GoTo.open(TopTab.home.rawValue) }.keyboardShortcut("1", modifiers: .command)
-                Button("Films") { GoTo.open(TopTab.movies.rawValue) }.keyboardShortcut("2", modifiers: .command)
-                Button("Séries") { GoTo.open(TopTab.shows.rawValue) }.keyboardShortcut("3", modifiers: .command)
-                Button("Pour toi") { GoTo.open(TopTab.forYou.rawValue) }.keyboardShortcut("4", modifiers: .command)
-                Button("Découvrir") { GoTo.open(TopTab.discover.rawValue) }.keyboardShortcut("5", modifiers: .command)
+                Button("Pour toi") { GoTo.open(TopTab.forYou.rawValue) }.keyboardShortcut("2", modifiers: .command)
+                Button("Films") { GoTo.open(TopTab.movies.rawValue) }.keyboardShortcut("3", modifiers: .command)
+                Button("Séries") { GoTo.open(TopTab.shows.rawValue) }.keyboardShortcut("4", modifiers: .command)
+                Button("Ma liste") { GoTo.open(TopTab.myList.rawValue) }.keyboardShortcut("5", modifiers: .command)
                 Button("En direct") { GoTo.open(TopTab.live.rawValue) }.keyboardShortcut("6", modifiers: .command)
                 Button("Recherche") { GoTo.open(TopTab.search.rawValue) }
                 Divider()

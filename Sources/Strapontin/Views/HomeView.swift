@@ -4,6 +4,26 @@ import SwiftUI
 
 struct HomeView: View {
     @EnvironmentObject var store: LibraryStore
+    @ObservedObject private var forYou = ForYouModel.shared
+    @ObservedObject private var tracker = TrackerModel.shared
+
+    /// Rangée « Pour toi » : les premières cartes du fil (l'onglet garde le fil complet).
+    private var picks: [TMDbSearchResult] {
+        forYou.cards.prefix(20).map { TMDbSearchResult(kind: $0.kind, tmdbId: $0.tmdbId, title: $0.title, year: $0.year, posterPath: $0.posterPath) }
+    }
+
+    private var myList: [TMDbSearchResult] {
+        tracker.follows.reversed().prefix(20).map {
+            TMDbSearchResult(kind: $0.kind, tmdbId: $0.tmdbId, title: $0.title, year: $0.year, posterPath: $0.posterPath)
+        }
+    }
+
+    /// Façon Netflix : ce qu'on reprend, ce qu'on nous propose, sa liste, les tendances ; la bibliothèque ensuite.
+    @ViewBuilder private var discovery: some View {
+        if !picks.isEmpty { TMDbShelf(title: "Pour toi", results: picks) }
+        if !myList.isEmpty { TMDbShelf(title: "Ma liste", results: myList) }
+        DiscoverRows()
+    }
 
     private var featured: [LibraryItem] {
         let withArt = store.items.filter { $0.media?.backdropPath != nil }
@@ -19,12 +39,14 @@ struct HomeView: View {
                 if store.items.isEmpty {
                     DownloadingShelf().padding(.top, 90)
                     ContinueShelf()
+                    discovery
                     EmptyLibrary(compact: !DownloadsModel.shared.visibleEntries(store: store).isEmpty)
                 } else {
                     HeroCarousel(items: featured)
-                    DownloadingShelf()
                     ContinueShelf()
-                    Shelf(title: "Ajoutés récemment") {
+                    DownloadingShelf()
+                    discovery
+                    Shelf(title: "Ajoutés récemment dans ta bibliothèque") {
                         ForEach(SortOrder.added.sort(store.items).prefix(20)) { PosterCard(item: $0) }
                     }
                     let movies = store.items.filter { $0.kind == .movie && !$0.allWatched }
@@ -44,6 +66,7 @@ struct HomeView: View {
             .padding(.bottom, 50)
         }
         .ignoresSafeArea(edges: .top)
+        .task { await ForYouModel.shared.loadIfNeeded() }
     }
 }
 

@@ -59,7 +59,7 @@ final class EssaiHarness: ObservableObject {
         let (verb, arg) = s.firstIndex(of: ":").map { (String(s[..<$0]), String(s[s.index(after: $0)...])) } ?? (s, "")
         switch verb {
         case "tab":
-            let map: [String: TopTab] = ["home": .home, "movies": .movies, "shows": .shows, "discover": .discover,
+            let map: [String: TopTab] = ["home": .home, "movies": .movies, "shows": .shows, "discover": .myList, "maliste": .myList,
                                          "downloads": .downloads, "search": .search, "foryou": .forYou, "direct": .live]
             if let t = map[arg] { send(.tab(t)) }
         case "open": send(.open(arg))

@@ -6,7 +6,7 @@ import UniformTypeIdentifiers
 enum TopTab: String, Hashable, CaseIterable, Identifiable {
     // ni Bibliothèque (doublon de Films + Séries : ses filtres et tris sont dans « Tous les films » / « Toutes les
     // séries ») ; les téléchargements sont sur les affiches, et dans leur onglet tant qu'il y en a en cours
-    case search = "Recherche", home = "Accueil", movies = "Films", shows = "Séries", forYou = "Pour toi", discover = "Découvrir"
+    case search = "Recherche", home = "Accueil", movies = "Films", shows = "Séries", forYou = "Pour toi", myList = "Ma liste"
     case live = "En direct"
     case downloads = "En téléchargement"
     var id: String { rawValue }
@@ -121,7 +121,7 @@ struct ContentView: View {
         case .shows: CategoryPage(kind: .tv)
         case .forYou: ForYouView()
         case .live: LiveTVView()
-        case .discover: DiscoverView()
+        case .myList: MyListPage()
         case .downloads: GridPage(title: "En téléchargement", items: [],
                                   downloads: downloads.visibleEntries(store: store).filter { !$0.isDone })
         }
@@ -169,7 +169,8 @@ private struct TopBar: View {
     var body: some View {
         HStack(spacing: 2) {
             icon("magnifyingglass", .search, help: "Recherche (⌘F)")
-            ForEach([TopTab.home, .movies, .shows, .forYou, .discover]) { item($0) }
+            // façon Netflix : l'accueil, la découverte, les films, les séries, sa liste ; le direct à part
+            ForEach([TopTab.home, .forYou, .movies, .shows, .myList]) { item($0) }
             // IPTV : seulement quand une playlist est configurée
             if iptv.configured {
                 item(.live)

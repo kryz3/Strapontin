@@ -107,26 +107,41 @@ struct SeriesFicheView: View {
         .frame(height: 620)
     }
 
+    /// L'épisode à lancer sans fichier : celui d'« À suivre » s'il y en a un, sinon le premier disponible en streaming.
+    private func playableEpisode(_ m: Media) -> TitleKey? {
+        if let e = ContinueWatching.entries(kind: .tv).first(where: { $0.key.mediaKey == m.key }) { return e.key }
+        let s = SeriesStreams.of(m.tmdbId)
+        guard let r = s.ref, let first = IPTVStore.shared.episodes[r.id]?.filter({ $0.season > 0 }).min(by: { ($0.season, $0.episode) < ($1.season, $1.episode) })
+        else { return nil }
+        return TitleKey(.tv, m.tmdbId, EpisodeKey(first.season, first.episode))
+    }
+
     @ViewBuilder
     private func notOwnedActions(_ m: Media, _ snap: SeriesModel.Snapshot) -> some View {
+        // une série regardable en streaming : Lecture d'abord, comme pour un film (l'épisode à suivre, sinon le premier)
+        let next = playableEpisode(m)
+        if let k = next {
+            PlaySourceButton(key: k, title: m.title, titles: [m.title, m.originalTitle ?? ""], year: m.year)
+        }
+        MyListButton(media: m)
         if let e = downloads.entry(for: series.key), !e.isDone {
             DownloadPill(progress: e.progress, label: [e.seasonLabel, e.statusLine].filter { !$0.isEmpty }.joined(separator: " · "))
         } else if tracker.pending.contains(series.key) {
             DownloadPill(progress: nil, label: "Envoi au téléchargement…")
         }
-        if !tracker.configured {
+        if !tracker.configured, next == nil {
             SettingsButton(tab: .indexer) {
                 Label("Configurer les téléchargements", systemImage: "gearshape").font(.system(size: 15, weight: .semibold))
                     .padding(.horizontal, 22).padding(.vertical, 11)
                     .background(.ultraThinMaterial, in: Capsule()).overlay(Capsule().stroke(.white.opacity(0.15)))
             }
             .buttonStyle(.plain)
-        } else {
+        } else if tracker.configured {
             if series.loadingReleases.contains(snap.season), series.releases[snap.season] == nil {
                 ProgressView().controlSize(.small)
             }
-            SeasonActions(series: series, snap: snap, prominent: true)
-            followButton(m)
+            // regardable en streaming : télécharger la saison passe au second plan
+            SeasonActions(series: series, snap: snap, prominent: next == nil)
         }
     }
 

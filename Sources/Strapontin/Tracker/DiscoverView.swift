@@ -59,43 +59,24 @@ private func tmdbClient() -> TMDbClient? {
     return s.effectiveTMDbKey.isEmpty ? nil : TMDbClient(key: s.effectiveTMDbKey, language: s.tmdbLanguage, omdbKey: s.omdbKey)
 }
 
-/// « Découvrir » : suivis, tendances et populaires du catalogue TMDb. La recherche est celle de la barre d'outils.
-struct DiscoverView: View {
-    @StateObject private var tracker = TrackerModel.shared
+/// Tendances et nouveautés du catalogue TMDb : des rangées de l'Accueil (l'ancien onglet « Découvrir »).
+struct DiscoverRows: View {
     @State private var rows: [(String, [TMDbSearchResult])] = []
     @State private var error: String?
 
-    private var followed: [TMDbSearchResult] {
-        tracker.follows.reversed().map {
-            TMDbSearchResult(kind: $0.kind, tmdbId: $0.tmdbId, title: $0.title, year: $0.year, posterPath: $0.posterPath)
-        }
-    }
-
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 36) {
-                Text("Découvrir").font(.system(size: 30, weight: .bold))
-                    .padding(.horizontal, Theme.margin)
-                if tmdbClient() == nil {
-                    MissingTMDbKey().padding(.top, 60)
-                }
-                if let error { Text(error).foregroundStyle(.orange).padding(.horizontal, Theme.margin) }
-                TMDbShelf(title: "Suivis", results: followed)
-                if rows.isEmpty && error == nil && tmdbClient() != nil {
-                    ForEach(["Films tendance", "Séries tendance", "Films populaires"], id: \.self) { SkeletonShelf(title: $0) }
-                }
-                ForEach(rows, id: \.0) { title, items in
-                    TMDbShelf(title: title, results: items)
-                }
+        Group {
+            if rows.isEmpty && error == nil && tmdbClient() != nil {
+                SkeletonShelf(title: "Tendances")
             }
-            .padding(.top, 70)
-            .padding(.bottom, 40)
+            ForEach(rows, id: \.0) { title, items in
+                TMDbShelf(title: title, results: items)
+            }
         }
-        .ignoresSafeArea(edges: .top)
         .task {
             guard rows.isEmpty, let c = tmdbClient() else { return }
             let t0 = ContinuousClock.now
-            defer { Perf.log("découvrir", since: t0) }
+            defer { Perf.log("accueil : tendances", since: t0) }
             do {
                 async let tm = c.trending(.movie)
                 async let tt = c.trending(.tv)
@@ -107,6 +88,54 @@ struct DiscoverView: View {
                 self.error = error.localizedDescription
             }
         }
+    }
+}
+
+/// « Ma liste » : ce qu'on veut regarder ou suivre, qu'on l'ait déjà ou non. Les nouveaux épisodes d'une série
+/// de la liste se téléchargent tout seuls quand les téléchargements sont configurés.
+struct MyListPage: View {
+    @ObservedObject private var tracker = TrackerModel.shared
+
+    private var titles: [TMDbSearchResult] {
+        tracker.follows.reversed().map {
+            TMDbSearchResult(kind: $0.kind, tmdbId: $0.tmdbId, title: $0.title, year: $0.year, posterPath: $0.posterPath)
+        }
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                Text("Ma liste").font(.system(size: 30, weight: .bold)).padding(.horizontal, Theme.margin)
+                if titles.isEmpty {
+                    ContentUnavailableView("Ta liste est vide", systemImage: "plus.circle",
+                                           description: Text("Sur la fiche d'un film ou d'une série, « + » l'ajoute ici. Les nouveaux épisodes des séries de ta liste se téléchargent tout seuls quand les téléchargements sont configurés."))
+                        .padding(.top, 60)
+                } else {
+                    TMDbShelf(title: "", results: titles, grid: true)
+                }
+            }
+            .padding(.top, 96).padding(.bottom, 40)
+        }
+        .ignoresSafeArea(edges: .top)
+        .background(Theme.backdrop)
+    }
+}
+
+/// « + » / « ✓ » : ajouter à Ma liste (sans rien télécharger d'un coup ; les nouveautés suivront).
+struct MyListButton: View {
+    let media: Media
+    @ObservedObject private var tracker = TrackerModel.shared
+
+    var body: some View {
+        let inList = tracker.isFollowed(media)
+        Button {
+            if inList { tracker.unfollow(media.key) } else { tracker.follow(media, backfill: false) }
+        } label: {
+            Image(systemName: inList ? "checkmark" : "plus").font(.system(size: 15, weight: .bold))
+                .contentTransition(.symbolEffect(.replace))
+        }
+        .buttonStyle(CircleButtonStyle())
+        .help(inList ? "Dans Ma liste — cliquer pour retirer" : "Ajouter à Ma liste")
     }
 }
 
@@ -500,6 +529,7 @@ struct PreviewDetailView: View {
     private var key: String { Media.key(kind, tmdbId) }
     @State private var scrollToVersions = false
     @State private var showAllVersions = false
+    @State private var versionsOpen = false
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -609,7 +639,7 @@ struct PreviewDetailView: View {
                 }
             } else if tracker.pending.contains(key) {
                 DownloadPill(progress: nil, label: "Envoi au téléchargement…")
-            } else if !tracker.configured {
+            } else if !tracker.configured, !hasStream {
                 SettingsButton(tab: .indexer) {
                     Label("Configurer les téléchargements", systemImage: "gearshape").font(.system(size: 15, weight: .semibold))
                         .padding(.horizontal, 22).padding(.vertical, 11)
@@ -618,18 +648,46 @@ struct PreviewDetailView: View {
                 .buttonStyle(.plain)
                 .help("Réglages › Téléchargements : où chercher les versions à télécharger")
             } else if let best = versions.first(where: { $0.score != nil }) {
-                PlayPill(title: "Télécharger", icon: "arrow.down") {
-                    tracker.grab(best, media: m)
+                if hasStream {
+                    // déjà regardable en streaming : télécharger devient secondaire
+                    Button { tracker.grab(best, media: m) } label: { Image(systemName: "arrow.down").font(.system(size: 15, weight: .bold)) }
+                        .buttonStyle(CircleButtonStyle()).help("Télécharger (la meilleure version selon tes réglages)")
+                } else {
+                    PlayPill(title: "Télécharger", icon: "arrow.down") {
+                        tracker.grab(best, media: m)
+                    }
+                    .help("La meilleure version selon tes réglages")
                 }
-                .help(best.item.releaseName)
             } else if !versions.isEmpty {
                 // des versions existent mais aucune ne colle aux préférences : on mène à la liste plutôt que rien
-                PlayPill(title: "Choisir une version", icon: "list.bullet") { scrollToVersions = true }
+                PlayPill(title: "Choisir une version", icon: "list.bullet") { versionsOpen = true; scrollToVersions = true }
                     .help("Aucune version ne correspond à tes préférences (langue, qualité, sources). Choisis-en une dans la liste.")
             } else if loadingVersions {
                 ProgressView().controlSize(.small)
             }
-            if tracker.configured { followButton(m) }
+            // façon Netflix : Lecture, Ma liste, et le reste dans ⋯
+            MyListButton(media: m)
+            Menu {
+                if tracker.configured {
+                    Button("Choisir une version à télécharger…") { versionsOpen = true; scrollToVersions = true }
+                } else {
+                    Button("Configurer les téléchargements…") { SettingsOpener.open(.indexer) }
+                }
+                if let imdb = m.imdbId, let url = URL(string: "https://www.imdb.com/title/\(imdb)/") {
+                    Link("Voir sur IMDb", destination: url)
+                }
+            } label: {
+                Image(systemName: "ellipsis").font(.system(size: 15, weight: .bold)).foregroundStyle(.white)
+                    .frame(width: 42, height: 42).background(.ultraThinMaterial, in: Circle())
+                    .overlay(Circle().stroke(.white.opacity(0.15)))
+            }
+            .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
+    }
+
+    /// Regardable tout de suite en streaming (le téléchargement passe alors au second plan).
+    private var hasStream: Bool {
+        guard let m = media else { return false }
+        return !Sources.now(TitleKey(.movie, tmdbId), titles: [m.title, m.originalTitle ?? ""], year: m.year).isEmpty
     }
 
     @ViewBuilder
@@ -667,7 +725,12 @@ struct PreviewDetailView: View {
     private func versionsSection(_ m: Media) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .firstTextBaseline, spacing: 16) {
-                Text("Versions disponibles").font(.system(size: 21, weight: .bold))
+                // repliée par défaut : « Télécharger » prend la meilleure version, ce détail est pour qui veut choisir
+                Button { withAnimation { versionsOpen.toggle() } } label: {
+                    Label("Versions à télécharger", systemImage: versionsOpen ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 21, weight: .bold))
+                }
+                .buttonStyle(.plain)
                 if !versions.isEmpty {
                     Text("\(versions.count)").font(.system(size: 17, weight: .semibold)).foregroundStyle(.secondary)
                 }
@@ -681,9 +744,10 @@ struct PreviewDetailView: View {
             if let versionsError {
                 Label(versionsError, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
             } else if !loadingVersions && versions.isEmpty {
-                Text("Rien à télécharger pour l'instant. Active le suivi (cloche) pour le récupérer dès sa sortie.")
+                Text("Rien à télécharger pour l'instant. Ajoute-le à Ma liste (+) pour le récupérer dès sa sortie.")
                     .foregroundStyle(.secondary)
             }
+            if versionsOpen {
             VStack(spacing: 2) {
                 ForEach(Array(versions.prefix(showAllVersions ? versions.count : 8).enumerated()), id: \.element.id) { i, r in
                     ReleaseRow(release: r, recommended: i == 0 && r.score != nil, sent: tracker.isSent(r)) {
@@ -696,6 +760,7 @@ struct PreviewDetailView: View {
                     withAnimation { showAllVersions.toggle() }
                 }
                 .buttonStyle(.link).font(.system(size: 13, weight: .medium))
+            }
             }
         }
         .padding(.horizontal, Theme.margin)

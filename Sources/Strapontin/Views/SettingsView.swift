@@ -17,6 +17,16 @@ struct SettingsButton<Label: View>: View {
     }
 }
 
+/// Ouvrir les réglages sur un onglet depuis un menu (là où SettingsLink ne s'emploie pas).
+@MainActor
+enum SettingsOpener {
+    static func open(_ tab: SettingsTab) {
+        UserDefaults.standard.set(tab.rawValue, forKey: SettingsTab.key)
+        NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+}
+
 struct SettingsView: View {
     @AppStorage(SettingsTab.key) private var tab = SettingsTab.library.rawValue
     var body: some View {
