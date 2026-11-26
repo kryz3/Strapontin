@@ -519,12 +519,7 @@ struct VolumeControl: View {
     let mute: () -> Void
 
     /// L'icône de l'état réel : coupé (ou à 0), puis une, deux ou trois ondes selon le volume.
-    static func icon(volume: Double, muted: Bool) -> String {
-        if muted || volume <= 0 { return "speaker.slash.fill" }
-        if volume < 34 { return "speaker.wave.1.fill" }
-        if volume < 67 { return "speaker.wave.2.fill" }
-        return "speaker.wave.3.fill"
-    }
+    static func icon(volume: Double, muted: Bool) -> String { VolumeIcon.name(volume: volume, muted: muted) }
 
     var body: some View {
         HStack(spacing: 8) {
