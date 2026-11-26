@@ -69,13 +69,15 @@ private struct LibrarySettings: View {
                 Text("Les nouveaux fichiers apparaissent tout seuls. Un rescan complet tourne aussi régulièrement.")
                     .foregroundStyle(.secondary)
             }
-            Picker("Rescan complet", selection: $settings.rescanMinutes) {
-                Text("Jamais").tag(0)
-                Text("Toutes les 5 min").tag(5)
-                Text("Toutes les 15 min").tag(15)
-                Text("Toutes les heures").tag(60)
+            DisclosureGroup("Avancé") {
+                Picker("Rescan complet", selection: $settings.rescanMinutes) {
+                    Text("Jamais").tag(0)
+                    Text("Toutes les 5 min").tag(5)
+                    Text("Toutes les 15 min").tag(15)
+                    Text("Toutes les heures").tag(60)
+                }
+                .onChange(of: settings.rescanMinutes) { _, _ in store.foldersChanged() }
             }
-            .onChange(of: settings.rescanMinutes) { _, _ in store.foldersChanged() }
             UpdateSettingsSection()
         }
         .formStyle(.grouped)
@@ -90,23 +92,26 @@ private struct MetadataSettings: View {
     var body: some View {
         Form {
             Section {
-                SecureField("Clé TMDb", text: $settings.tmdbKey,
-                            prompt: Text(Secrets.tmdbKey.isEmpty ? "Obligatoire (gratuite sur themoviedb.org)" : "Clé fournie avec l'app"))
                 Picker("Langue des fiches", selection: $settings.tmdbLanguage) {
                     Text("Français").tag("fr-FR")
                     Text("Français (Canada)").tag("fr-CA")
                     Text("Anglais").tag("en-US")
                 }
-                SecureField("Clé OMDb (note IMDb, facultatif)", text: $settings.omdbKey)
-                HStack {
-                    Button("Tester la clé") {
-                        let c = TMDbClient(key: settings.effectiveTMDbKey, language: settings.tmdbLanguage)
-                        Task {
-                            do { try await c.check(); test = "✓ Clé valide" } catch { test = error.localizedDescription }
+                Button("Ré-identifier les vidéos non reconnues") { store.rescan(retryNotFound: true) }
+                // les clés sont fournies avec l'app : on n'y touche que pour mettre la sienne
+                DisclosureGroup("Avancé") {
+                    SecureField("Clé TMDb", text: $settings.tmdbKey,
+                                prompt: Text(Secrets.tmdbKey.isEmpty ? "Obligatoire (gratuite sur themoviedb.org)" : "Clé fournie avec l'app"))
+                    SecureField("Clé OMDb (note IMDb, facultatif)", text: $settings.omdbKey)
+                    HStack {
+                        Button("Tester la clé") {
+                            let c = TMDbClient(key: settings.effectiveTMDbKey, language: settings.tmdbLanguage)
+                            Task {
+                                do { try await c.check(); test = "✓ Clé valide" } catch { test = error.localizedDescription }
+                            }
                         }
+                        if let test { Text(test).foregroundStyle(.secondary) }
                     }
-                    Button("Ré-identifier les non trouvés") { store.rescan(retryNotFound: true) }
-                    if let test { Text(test).foregroundStyle(.secondary) }
                 }
             } footer: {
                 Text("Les fiches viennent de TMDb, qui fournit aussi le lien IMDb. Une clé saisie ici remplace celle fournie avec l'app. IMDb n'a pas d'API publique : la note IMDb passe par OMDb (clé gratuite sur omdbapi.com).\n\nThis product uses TMDB and the TMDB APIs but is not endorsed, certified, or otherwise approved by TMDB.")
@@ -133,23 +138,27 @@ private struct PlaybackSettings: View {
                     .foregroundStyle(.secondary)
             }
             Section {
-                Picker("Décodage", selection: $settings.hwdec) {
-                    Text("Matériel si fiable (recommandé)").tag("auto-safe")
-                    Text("Matériel (VideoToolbox)").tag("videotoolbox")
-                    Text("Logiciel uniquement").tag("no")
-                }
-                Toggle("Mise à l'échelle haute qualité", isOn: $settings.highQuality)
-                Toggle("Audio en passthrough vers l'ampli (TrueHD, DTS-HD…)", isOn: $settings.passthrough)
                 TextField("Langues audio préférées", text: $settings.audioLangs)
                 TextField("Langues de sous-titres", text: $settings.subLangs)
+                DisclosureGroup("Avancé") {
+                    Picker("Décodage", selection: $settings.hwdec) {
+                        Text("Matériel si fiable (recommandé)").tag("auto-safe")
+                        Text("Matériel (VideoToolbox)").tag("videotoolbox")
+                        Text("Logiciel uniquement").tag("no")
+                    }
+                    Toggle("Mise à l'échelle haute qualité", isOn: $settings.highQuality)
+                    Toggle("Audio en passthrough vers l'ampli (TrueHD, DTS-HD…)", isOn: $settings.passthrough)
+                }
             } footer: {
                 Text("Lecture directe par mpv : le fichier est décodé tel quel, sans transcodage ni recompression. Les réglages s'appliquent à la prochaine vidéo ouverte.")
                     .foregroundStyle(.secondary)
             }
             Section {
-                SecureField("Clé API OpenSubtitles", text: $settings.openSubtitlesKey,
-                            prompt: Text(Secrets.openSubtitlesKey.isEmpty ? "à créer sur opensubtitles.com" : "fournie avec l'app"))
                 TextField("Langues cherchées", text: $settings.onlineSubLangs, prompt: Text("fr,en"))
+                DisclosureGroup("Avancé") {
+                    SecureField("Ta clé API OpenSubtitles", text: $settings.openSubtitlesKey,
+                                prompt: Text(Secrets.openSubtitlesKey.isEmpty ? "à créer sur opensubtitles.com" : "facultative : une clé est fournie avec l'app"))
+                }
             } header: {
                 Text("Sous-titres en ligne")
             } footer: {

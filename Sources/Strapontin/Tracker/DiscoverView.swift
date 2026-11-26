@@ -529,7 +529,8 @@ struct PreviewDetailView: View {
     private var key: String { Media.key(kind, tmdbId) }
     @State private var scrollToVersions = false
     @State private var showAllVersions = false
-    @State private var versionsOpen = false
+    /// La recommandée et deux autres d'emblée (le choix compte : ce n'est pas du streaming) ; le reste sur demande.
+    @State private var versionsOpen = true
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -749,13 +750,13 @@ struct PreviewDetailView: View {
             }
             if versionsOpen {
             VStack(spacing: 2) {
-                ForEach(Array(versions.prefix(showAllVersions ? versions.count : 8).enumerated()), id: \.element.id) { i, r in
+                ForEach(Array(versions.prefix(showAllVersions ? versions.count : 3).enumerated()), id: \.element.id) { i, r in
                     ReleaseRow(release: r, recommended: i == 0 && r.score != nil, sent: tracker.isSent(r)) {
                         tracker.grab(r, media: m)
                     }
                 }
             }
-            if versions.count > 8 {
+            if versions.count > 3 {
                 Button(showAllVersions ? "Moins de versions" : "Afficher les \(versions.count) versions") {
                     withAnimation { showAllVersions.toggle() }
                 }
@@ -790,24 +791,18 @@ struct ReleaseRow: View {
             HStack(spacing: 14) {
                 Image(systemName: sent ? "checkmark.circle.fill" : "arrow.down.circle.fill")
                     .font(.system(size: 26)).foregroundStyle(sent ? Color.green : .white.opacity(release.score == nil ? 0.4 : 0.9))
-                VStack(alignment: .leading, spacing: 5) {
-                    HStack(spacing: 6) {
-                        if recommended { Badge(text: "RECOMMANDÉ", color: Theme.accent) }
-                        ForEach(badges, id: \.self) { SpecBadge(text: $0) }
-                        if release.info.isSeasonPack { SpecBadge(text: "SAISON COMPLÈTE") }
-                        else if let r = release.info.episodes {
-                            SpecBadge(text: r.count > 1 ? "ÉPISODES \(r.lowerBound) À \(r.upperBound)" : "ÉPISODE \(r.lowerBound)")
-                        }
+                // en mots simples : ce qu'on aura (qualité, langue, taille) et si ça viendra vite ; le nom technique au survol
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 8) {
+                        if recommended { Badge(text: "RECOMMANDÉE", color: Theme.accent) }
+                        Text(plain).font(.system(size: 14, weight: .semibold))
                     }
-                    Text(release.item.releaseName).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1)
+                    Text(availability).font(.system(size: 12)).foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 20)
                 VStack(alignment: .trailing, spacing: 3) {
                     Text(humanSize(release.item.size)).font(.system(size: 13, weight: .semibold)).monospacedDigit()
-                    HStack(spacing: 4) {
-                        Circle().fill(seedColor).frame(width: 6, height: 6)
-                        Text("\(release.item.seeders ?? 0) source\((release.item.seeders ?? 0) > 1 ? "s" : "")").font(.system(size: 11)).foregroundStyle(.secondary)
-                    }
+                    Circle().fill(seedColor).frame(width: 7, height: 7)
                 }
             }
             .padding(.horizontal, 14).padding(.vertical, 10)
@@ -818,10 +813,46 @@ struct ReleaseRow: View {
         .disabled(sent || blocked != nil)
         .opacity(blocked != nil && !sent ? 0.45 : 1)
         .onHover { h in withAnimation(.easeOut(duration: 0.15)) { hover = h } }
-        .help(blocked ?? (release.score == nil ? "Ne correspond pas à tes préférences (langue, qualité ou sources), mais tu peux la prendre quand même." : "Télécharger cette version"))
+        .help(blocked ?? ((release.score == nil ? "Ne correspond pas à tes préférences (langue, qualité), mais tu peux la prendre quand même.\n" : "")
+                          + release.item.releaseName))
         .contextMenu {
             if !sent, blocked == nil { Button("Télécharger") { download() } }
+            Button("Copier le nom complet") {
+                NSPasteboard.general.clearContents(); NSPasteboard.general.setString(release.item.releaseName, forType: .string)
+            }
             if let u = release.item.detailsURL.flatMap(URL.init(string:)) { Link("Voir la page de cette version", destination: u) }
+        }
+    }
+
+    /// « Full HD · Français · HDR · Saison complète ».
+    private var plain: String {
+        var p: [String] = []
+        switch release.info.resolution { case 2160?: p.append("4K"); case 1080?: p.append("Full HD"); case 720?: p.append("HD"); case .some: p.append("Basse qualité"); default: break }
+        switch release.info.language {
+        case .multi?: p.append("Français + VO")
+        case .vff?, .french?: p.append("Français")
+        case .vfq?: p.append("Français (Québec)")
+        case .vostfr?: p.append("VO sous-titrée")
+        case .vo?: p.append("VO")
+        default: break
+        }
+        let q = release.item.releaseName.lowercased()
+        if q.range(of: #"\bdv\b|dolby.?vision|\bdovi\b"#, options: .regularExpression) != nil { p.append("Dolby Vision") }
+        else if q.contains("hdr") { p.append("HDR") }
+        if q.contains("atmos") { p.append("Atmos") }
+        if release.info.isSeasonPack { p.append("Saison complète") }
+        else if let r = release.info.episodes { p.append(r.count > 1 ? "Épisodes \(r.lowerBound) à \(r.upperBound)" : "Épisode \(r.lowerBound)") }
+        return p.isEmpty ? "Version" : p.joined(separator: " · ")
+    }
+
+    /// Si le téléchargement ira vite, d'après le nombre de personnes qui partagent la version.
+    private var availability: String {
+        let n = release.item.seeders ?? 0
+        switch n {
+        case 0: return "Personne ne la partage : ne se téléchargera sans doute pas"
+        case 1...4: return "Peu partagée (\(n)) : téléchargement lent"
+        case 5...49: return "Partagée par \(n) personnes"
+        default: return "Très partagée (\(n)) : rapide"
         }
     }
 

@@ -32,6 +32,9 @@ protocol PlayerActions: AnyObject {
     func pickOnlineSubtitle(_ fileId: Int)
     func select(_ track: Track?, type: String)
     func toggleInfo()
+    func setSpeed(_ s: Double)
+    func restartFromBeginning()
+    func toggleHelp()
     func refreshTracks()
     func closePlayer()
     func playNextNow()
@@ -108,6 +111,19 @@ struct PlayerControlsView: View {
                     .transition(.move(edge: .trailing).combined(with: .opacity))
             }
 
+            if let r = model.resumedAt {
+                HStack(spacing: 12) {
+                    Text("Reprise à \(formatTime(r))").font(.system(size: 13, weight: .semibold))
+                    Button("Depuis le début") { actions.restartFromBeginning() }
+                        .buttonStyle(.plain).font(.system(size: 13, weight: .bold)).foregroundStyle(Theme.accentText)
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 16).padding(.vertical, 9)
+                .background(.ultraThinMaterial, in: Capsule())
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top).padding(.top, 20)
+                .transition(.opacity)
+            }
+            if model.showHelp { ShortcutsHelp(live: model.live != nil) { actions.toggleHelp() } }
             if let v = model.volumeShown {
                 Label(v == 0 ? "Son coupé" : "\(Int(v)) %", systemImage: VolumeControl.icon(volume: v, muted: false))
                     .font(.system(size: 13, weight: .semibold).monospacedDigit()).foregroundStyle(.white)
@@ -350,7 +366,20 @@ struct PlayerControlsView: View {
                         Image(systemName: "captions.bubble.fill").font(.system(size: 15, weight: .semibold))
                     }
                     .buttonStyle(GlassCircle(size: 38))
-                    .help("Audio et sous-titres")
+                    .help("Audio, sous-titres et source")
+                    Menu {
+                        ForEach([0.75, 1, 1.25, 1.5, 2.0], id: \.self) { v in
+                            Button((model.speed == v ? "✓ " : "") + SpeedText.label(v)) { actions.setSpeed(v) }
+                        }
+                        Divider()
+                        Text("[ et ] : plus lent, plus vite · = : normal")
+                    } label: {
+                        Text(SpeedText.label(model.speed)).font(.system(size: 12, weight: .bold).monospacedDigit())
+                            .foregroundStyle(.white).frame(width: 38, height: 38)
+                            .background(Circle().fill(.white.opacity(model.speed == 1 ? 0.18 : 0.35)))
+                    }
+                    .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
+                    .help("Vitesse de lecture")
                     .popover(isPresented: $showTracks, arrowEdge: .top) {
                         TracksPanel(audio: model.audioTracks, subs: model.subTracks, versions: model.versions,
                                     currentVersion: model.currentVersion, selectVersion: actions.selectVersion,
@@ -649,4 +678,47 @@ struct VersionOption: Identifiable, Hashable {
     var id: String
     var label: String
     var detail: String
+}
+
+enum SpeedText {
+    /// « 1× », « 1,25× », « 0,75× ».
+    static func label(_ v: Double) -> String { String(format: "%g×", v).replacingOccurrences(of: ".", with: ",") }
+}
+
+/// Touche ? : les raccourcis du lecteur, sur une carte qu'Échap ou un clic referme.
+struct ShortcutsHelp: View {
+    let live: Bool
+    let close: () -> Void
+
+    private var rows: [(String, String)] {
+        var r: [(String, String)] = [("Espace", "Lecture / pause"), ("← →", "Reculer / avancer de 5 s (⇧ : 1 min)")]
+        if live {
+            r += [("↑ ↓", "Chaîne précédente / suivante"), ("0–9", "Aller à une chaîne"), ("⌫", "Chaîne d'avant"), ("*", "Favori")]
+        } else {
+            r += [("↑ ↓", "Volume"), ("[ ] =", "Plus lent, plus vite, vitesse normale"), ("N / ⇧N", "Épisode suivant / précédent"),
+                  ("E", "Tous les épisodes"), ("Entrée", "Passer l'intro, lancer l'épisode suivant")]
+        }
+        r += [("M", "Couper / remettre le son"), ("A / S", "Piste audio / sous-titres suivants"), ("F", "Plein écran"),
+              ("⇧P", "Mini-lecteur"), ("I", "Informations"), ("Échap", "Fermer")]
+        return r
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Raccourcis").font(.system(size: 18, weight: .bold))
+            Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 7) {
+                ForEach(rows, id: \.0) { k, v in
+                    GridRow {
+                        Text(k).font(.system(size: 13, weight: .semibold).monospaced()).foregroundStyle(.white)
+                        Text(v).font(.system(size: 13)).foregroundStyle(.white.opacity(0.8))
+                    }
+                }
+            }
+        }
+        .padding(24)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .contentShape(Rectangle())
+        .onTapGesture(perform: close)
+    }
 }

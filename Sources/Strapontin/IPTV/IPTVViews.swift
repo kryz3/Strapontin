@@ -7,6 +7,7 @@ import SwiftUI
 /// rangées (Favoris, Récentes, un rang par groupe) de cartes au format des vignettes, la barre des pays, la recherche.
 struct LiveTVView: View {
     @ObservedObject private var store = IPTVStore.shared
+    @AppStorage("liveGuideMode") private var guideMode = false
     @State private var query = ""
     @State private var results: [IPTVEntry] = []
     static let all = "Toutes"
@@ -51,8 +52,19 @@ struct LiveTVView: View {
                             CountryBar(counts: store.channelCountries, total: store.channels.count)
                         }
                         Spacer(minLength: 0)
+                        Picker("", selection: $guideMode) {
+                            Text("Chaînes").tag(false)
+                            Text("Guide").tag(true)
+                        }
+                        .pickerStyle(.segmented).labelsHidden().fixedSize()
                         IPTVSearchField(text: $query, prompt: "Chaîne, numéro, groupe…").padding(.trailing, Theme.margin)
                     }
+                    if guideMode {
+                        // favoris d'abord, puis les chaînes du pays choisi
+                        let favs = store.favoriteChannels
+                        let favIDs = Set(favs.map(\.id))
+                        LiveGuideView(channels: favs + groups.flatMap(\.1).filter { !favIDs.contains($0.id) })
+                    } else {
                     if !store.favoriteChannels.isEmpty { channelRow("Favoris", store.favoriteChannels, reorder: true) }
                     if !store.recentChannels.isEmpty { channelRow("Récentes", Array(store.recentChannels.prefix(15))) }
                     if store.channels.isEmpty && store.loading {
@@ -72,6 +84,7 @@ struct LiveTVView: View {
                                 }
                             }
                         }
+                    }
                     }
                 }
             }
@@ -600,9 +613,11 @@ private struct PlaylistEditor: View {
                 }
             }
             }
-            TextField("Guide des programmes (facultatif)", text: $playlist.guide, prompt: Text("Sinon celui annoncé par la playlist"))
-            TextField("Avancé · nom de lecteur envoyé (facultatif)", text: $playlist.userAgent, prompt: Text("Par défaut : \(LiveOptions.defaultUserAgent)"))
-            TextField("Avancé · page d'origine (facultatif)", text: $playlist.referer)
+            DisclosureGroup("Avancé") {
+                TextField("Guide des programmes", text: $playlist.guide, prompt: Text("Sinon celui annoncé par la playlist"))
+                TextField("Nom de lecteur envoyé", text: $playlist.userAgent, prompt: Text("Par défaut : \(LiveOptions.defaultUserAgent)"))
+                TextField("Page d'origine", text: $playlist.referer)
+            }
             Stepper("Rafraîchir toutes les \(playlist.refreshHours) h", value: $playlist.refreshHours, in: 1...72)
             HStack {
                 Spacer()
@@ -691,5 +706,105 @@ struct CountryBar: View {
             .foregroundStyle(selected ? Color.black : Color.white)
         }
         .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Guide des programmes
+
+/// Le guide façon télé : une ligne par chaîne, trois heures à partir de maintenant ; le programme en cours ressort,
+/// un clic lance la chaîne. Le programme n'est demandé au serveur que pour les lignes affichées (puis gardé 15 min).
+struct LiveGuideView: View {
+    let channels: [IPTVEntry]
+    @ObservedObject private var store = IPTVStore.shared
+    @State private var start = LiveGuideView.slot(Date())
+    private let hours = 3.0
+    private let perMinute: CGFloat = 4.5
+    private let nameWidth: CGFloat = 190
+
+    /// La demi-heure en cours (le guide commence là).
+    static func slot(_ d: Date) -> Date {
+        let t = d.timeIntervalSince1970
+        return Date(timeIntervalSince1970: t - t.truncatingRemainder(dividingBy: 1800))
+    }
+
+    private var end: Date { start.addingTimeInterval(hours * 3600) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            timeHeader
+            LazyVStack(alignment: .leading, spacing: 4) {
+                ForEach(channels.prefix(300)) { c in row(c).onAppear { Task { await store.loadShortEPG(c) } } }
+            }
+            if channels.count > 300 {
+                Text("Les 300 premières chaînes de la sélection ; choisis un pays ou un groupe pour voir les autres.")
+                    .font(.system(size: 12)).foregroundStyle(.secondary).padding(.top, 10)
+            }
+        }
+        .padding(.horizontal, Theme.margin)
+    }
+
+    private var timeHeader: some View {
+        HStack(spacing: 0) {
+            Color.clear.frame(width: nameWidth)
+            ZStack(alignment: .leading) {
+                ForEach(0..<Int(hours * 2), id: \.self) { i in
+                    Text(start.addingTimeInterval(Double(i) * 1800).formatted(date: .omitted, time: .shortened))
+                        .font(.system(size: 12, weight: .semibold).monospacedDigit()).foregroundStyle(.secondary)
+                        .offset(x: CGFloat(i * 30) * perMinute)
+                }
+            }
+            .frame(width: CGFloat(hours * 60) * perMinute, alignment: .leading)
+        }
+        .padding(.bottom, 8)
+    }
+
+    private func x(_ d: Date) -> CGFloat { CGFloat(max(0, d.timeIntervalSince(start)) / 60) * perMinute }
+
+    private func row(_ c: IPTVEntry) -> some View {
+        let list = store.programs(c, from: start, to: end)
+        let now = Date()
+        return HStack(spacing: 0) {
+            Button { PlayerController.playLive(c) } label: {
+                HStack(spacing: 10) {
+                    ChannelLogo(logo: c.logo, name: c.name, collapsedSize: CGSize(width: 44, height: 28))
+                    Text(c.name).font(.system(size: 13, weight: .semibold)).lineLimit(1)
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 8).frame(width: nameWidth, height: 46, alignment: .leading)
+                .background(RoundedRectangle(cornerRadius: 8).fill(.white.opacity(0.06)))
+            }
+            .buttonStyle(.plain)
+            .padding(.trailing, 4)
+            ZStack(alignment: .leading) {
+                if list.isEmpty {
+                    Text(store.shortEPG[c.id] == nil && c.tvgId == nil ? "Programme non fourni pour cette chaîne" : "Programme non fourni")
+                        .font(.system(size: 12)).foregroundStyle(.tertiary).padding(.horizontal, 10)
+                        .frame(width: CGFloat(hours * 60) * perMinute, height: 46, alignment: .leading)
+                        .background(RoundedRectangle(cornerRadius: 8).fill(.white.opacity(0.03)))
+                }
+                ForEach(list, id: \.self) { p in
+                    let x0 = x(p.start), x1 = min(x(p.stop), CGFloat(hours * 60) * perMinute)
+                    let current = p.start <= now && now < p.stop
+                    Button { PlayerController.playLive(c) } label: {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(p.title).font(.system(size: 12, weight: current ? .bold : .semibold)).lineLimit(1)
+                            Text(p.start.formatted(date: .omitted, time: .shortened) + " – " + p.stop.formatted(date: .omitted, time: .shortened))
+                                .font(.system(size: 10).monospacedDigit()).foregroundStyle(.secondary)
+                        }
+                        .padding(.horizontal, 8)
+                        .frame(width: max(8, x1 - x0 - 3), height: 46, alignment: .leading)
+                        .background(RoundedRectangle(cornerRadius: 8).fill(current ? Theme.accent.opacity(0.35) : .white.opacity(0.08)))
+                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(current ? Theme.accent : .clear, lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+                    .help(p.detail ?? p.title)
+                    .offset(x: x0)
+                }
+                // l'heure qu'il est
+                Rectangle().fill(Theme.accent).frame(width: 2, height: 50).offset(x: x(now))
+            }
+            .frame(width: CGFloat(hours * 60) * perMinute, height: 46, alignment: .leading)
+            .clipped()
+        }
     }
 }

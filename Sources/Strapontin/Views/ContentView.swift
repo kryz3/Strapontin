@@ -46,6 +46,7 @@ struct ContentView: View {
     @State private var tab: TopTab = .home
     @State private var search = ""
     @State private var path = NavigationPath()
+    @State private var showWelcome = false
     @ObservedObject private var downloads = DownloadsModel.shared
     @ObservedObject private var tracker = TrackerModel.shared
 
@@ -86,8 +87,12 @@ struct ContentView: View {
             .keyboardShortcut("f", modifiers: .command).hidden())
         .onChange(of: tab) { _, _ in path = NavigationPath() }
         // menu Aller (⌘1 à ⌘4, Stockage, Indexeur)
+        // premier lancement : l'assistant (une fois ; il se rouvre depuis Aide › Assistant de démarrage)
+        .sheet(isPresented: $showWelcome) { WelcomeView() }
+        .onAppear { if !UserDefaults.standard.bool(forKey: WelcomeView.doneKey), !EssaiHarness.enabled { showWelcome = true } }
         .onReceive(NotificationCenter.default.publisher(for: GoTo.name)) { n in
             guard let target = n.object as? String else { return }
+            if target == "welcome" { showWelcome = true; return }
             if let t = TopTab(rawValue: target) { path = NavigationPath(); tab = t; if t == .search { SearchFocus.request() } }
             else { path = NavigationPath(); path.append(target) }
         }

@@ -104,6 +104,9 @@ struct StrapontinApp: App {
                 UpdateMenuItem()
             }
             // menu « Aller » : chaque page de la barre du haut, plus Stockage et Indexeur (sans bouton dédié)
+            CommandGroup(after: .help) {
+                Button("Assistant de démarrage…") { GoTo.open("welcome") }
+            }
             CommandMenu("Aller") {
                 Button("Accueil") { GoTo.open(TopTab.home.rawValue) }.keyboardShortcut("1", modifiers: .command)
                 Button("Pour toi") { GoTo.open(TopTab.forYou.rawValue) }.keyboardShortcut("2", modifiers: .command)

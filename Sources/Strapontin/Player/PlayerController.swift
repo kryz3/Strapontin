@@ -94,6 +94,12 @@ final class PlayerModel: ObservableObject {
     @Published var volumeShown: Double?
     /// Son coupé (état de mpv).
     @Published var muted = false
+    /// Vitesse de lecture (1 = normale).
+    @Published var speed: Double = 1
+    /// « Reprise à 12:34 » : la position reprise, affichée quelques secondes avec « Depuis le début ».
+    @Published var resumedAt: Double?
+    /// Aide des raccourcis (touche ?).
+    @Published var showHelp = false
     @Published var currentVersion: String?
     @Published var info: String?
     @Published var isFullScreen = false
@@ -392,6 +398,16 @@ final class PlayerController: NSObject, NSWindowDelegate {
         }
         prepareStream(item)
         player.load(item.path, start: item.start)
+        // un titre commencé reprend où on l'avait laissé ; on le dit, avec de quoi revenir au début
+        if item.live == nil, item.start > 30 {
+            model.resumedAt = item.start
+            let shown = item.start
+            DispatchQueue.main.asyncAfter(deadline: .now() + 8) { [weak self] in
+                if self?.model.resumedAt == shown { withAnimation { self?.model.resumedAt = nil } }
+            }
+        } else {
+            model.resumedAt = nil
+        }
         NowPlaying.shared.attach(self)
         publishNowPlaying()
     }
@@ -866,6 +882,20 @@ extension PlayerController: PlayerActions {
             MainActor.assumeIsolated { withAnimation(.easeOut(duration: 0.2)) { self?.model.volumeShown = nil } }
         }
     }
+    func setSpeed(_ s: Double) {
+        model.speed = s
+        player.set("speed", String(s))
+        activity()
+    }
+
+    func restartFromBeginning() {
+        model.resumedAt = nil
+        player.seek(absolute: 0, exact: true)
+        activity()
+    }
+
+    func toggleHelp() { model.showHelp.toggle(); activity() }
+
     func toggleMute() {
         player.toggleMute()
         // l'indicateur bref, comme pour le volume ; l'icône suit l'état renvoyé par mpv
@@ -993,8 +1023,9 @@ final class PlayerContainerView: NSView {
         case 125: c.setVolume(max(0, c.model.volume - 5))         // ↓
         case 126: c.setVolume(min(150, c.model.volume + 5))       // ↑
         case 53:                                                  // échap : le panneau d'abord, puis le lecteur
-            // d'abord ce qui est ouvert par-dessus : panneau Épisodes, carte « Épisode suivant »
-            if c.model.episodesOpen { c.toggleEpisodes() } else if c.model.next != nil { c.dismissNext() } else { c.closePlayer() }
+            // d'abord ce qui est ouvert par-dessus : aide, panneau Épisodes, carte « Épisode suivant »
+            if c.model.showHelp { c.toggleHelp() } else if c.model.episodesOpen { c.toggleEpisodes() }
+            else if c.model.next != nil { c.dismissNext() } else { c.closePlayer() }
         case 36, 76: return c.primaryOverlayAction()              // entrée : Passer l'intro, Lire maintenant
         default:
             // les raccourcis avec ⌘ (⌘W, ⌘Q…) restent aux menus
@@ -1003,7 +1034,11 @@ final class PlayerContainerView: NSView {
                 if ch.isNumber { c.typeDigit(ch); return true }
                 if ch == "*" { c.toggleFavoriteChannel(); return true }
             }
+            if e.characters == "?" { c.toggleHelp(); return true }
             switch e.charactersIgnoringModifiers?.lowercased() ?? "" {
+            case "[" where !c.isLive: c.setSpeed(max(0.5, c.model.speed - 0.25))
+            case "]" where !c.isLive: c.setSpeed(min(2, c.model.speed + 0.25))
+            case "=" where !c.isLive: c.setSpeed(1)
             case "f": c.toggleFullScreen()
             case "m": c.toggleMute()
             case "n": if e.modifierFlags.contains(.shift) { c.playPrevious() } else { c.playNext() }

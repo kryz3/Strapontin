@@ -117,6 +117,8 @@ final class EssaiHarness: ObservableObject {
             if let r = FeedReaction(rawValue: arg), let first = m.cards.first { m.react(first, r) }
             print("ESSAI pourtoi", m.cards.prefix(8).map { "\($0.title) [\($0.genreIds.first ?? 0)] ← \($0.because ?? "découverte")" }.joined(separator: " | "))
             fflush(stdout)
+        case "bienvenue": GoTo.open("welcome")
+        case "guide": UserDefaults.standard.set(arg == "oui", forKey: "liveGuideMode")   // En direct : Chaînes / Guide
         case "titre":   // titre:tv:33050:1:4 → état du titre, toutes sources
             if let k = TitleKey(id: arg) {
                 let p = Watch.point(k)

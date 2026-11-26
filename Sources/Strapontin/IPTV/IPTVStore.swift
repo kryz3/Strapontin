@@ -586,6 +586,12 @@ final class IPTVStore: ObservableObject {
     // MARK: programme court (Xtream)
 
     /// Ce qui passe maintenant et ensuite : guide XMLTV s'il y en a un, sinon le programme court demandé au serveur.
+    /// Les programmes d'une chaîne entre deux heures (guide XMLTV, sinon programme court du serveur).
+    func programs(_ e: IPTVEntry, from: Date, to: Date) -> [ProgramGuide.Program] {
+        let list = e.tvgId.flatMap { guide.programs[$0.lowercased()] } ?? shortEPG[e.id] ?? []
+        return list.filter { $0.stop > from && $0.start < to }
+    }
+
     func nowNext(_ e: IPTVEntry) -> (now: ProgramGuide.Program?, next: ProgramGuide.Program?) {
         let g = guide.nowNext(e.tvgId)
         if g.now != nil || g.next != nil { return g }
@@ -605,7 +611,7 @@ final class IPTVStore: ObservableObject {
         guard let slash = raw.lastIndex(of: "/"), raw[raw.index(after: slash)...].first == "x",
               let sid = Int(raw[raw.index(raw.index(after: slash), offsetBy: 1)...]) else { return }
         epgAsked[e.id] = Date()
-        if let d = try? await Self.data(account.api("get_short_epg", ["stream_id": String(sid), "limit": "4"]), p) {
+        if let d = try? await Self.data(account.api("get_short_epg", ["stream_id": String(sid), "limit": "10"]), p) {
             shortEPG[e.id] = XtreamParser.shortEPG(d)
         }
     }
