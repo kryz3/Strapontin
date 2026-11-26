@@ -92,6 +92,8 @@ final class PlayerModel: ObservableObject {
     @Published var onlineSubs: OnlineSubs = .idle
     /// Volume affiché brièvement après un réglage (↑ ↓, molette, curseur).
     @Published var volumeShown: Double?
+    /// Son coupé (état de mpv).
+    @Published var muted = false
     @Published var currentVersion: String?
     @Published var info: String?
     @Published var isFullScreen = false
@@ -232,6 +234,8 @@ final class PlayerController: NSObject, NSWindowDelegate {
     private func bindPlayer() {
         player.onTime = { [weak self] t in self?.timeChanged(t) }
         player.onDuration = { [weak self] d in self?.model.duration = d; self?.publishNowPlaying() }
+        player.onMute = { [weak self] m in if self?.model.muted != m { self?.model.muted = m } }
+        player.onVolume = { [weak self] v in if let self, abs(self.model.volume - v) > 0.5 { self.model.volume = v } }
         player.onPause = { [weak self] p in
             self?.model.paused = p
             self?.activity()
@@ -850,6 +854,8 @@ extension PlayerController: PlayerActions {
         advance()
     }
     func setVolume(_ v: Double) {
+        // régler le volume remet le son, comme dans QuickTime
+        if model.muted, v > 0 { player.set("mute", "no") }
         model.volume = v
         player.setVolume(v)
         model.volumeShown = v
@@ -858,7 +864,15 @@ extension PlayerController: PlayerActions {
             MainActor.assumeIsolated { withAnimation(.easeOut(duration: 0.2)) { self?.model.volumeShown = nil } }
         }
     }
-    func toggleMute() { player.toggleMute() }
+    func toggleMute() {
+        player.toggleMute()
+        // l'indicateur bref, comme pour le volume ; l'icône suit l'état renvoyé par mpv
+        model.volumeShown = model.muted ? model.volume : 0
+        volumeTimer?.invalidate()
+        volumeTimer = Timer.scheduledTimer(withTimeInterval: 1.2, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated { withAnimation(.easeOut(duration: 0.2)) { self?.model.volumeShown = nil } }
+        }
+    }
     func toggleFullScreen() {
         if ownsWindow { window?.toggleFullScreen(nil) } else { player.command(["cycle", "fullscreen"]) }
     }
@@ -1038,6 +1052,10 @@ extension PlayerController {
             model.controlsVisible = value != "non"
             lastActivity = value != "non" ? Date() : .distantPast
         case "fermer": close()
+        case "muet": toggleMute()
+        case "volume": if let v = Double(value) { setVolume(v) }
+        case "son":   // l'état que montre l'icône
+            print("ESSAI son muet=\(model.muted) volume=\(Int(model.volume)) icone=\(VolumeControl.icon(volume: model.volume, muted: model.muted))"); fflush(stdout)
         case "versions":   // les versions proposées, et celle qu'on lit
             let all = model.versions.map { ($0.id == model.currentVersion ? "*" : "") + $0.label }
             print("ESSAI versions [\(all.joined(separator: " | "))] sous-titres=\(model.subTracks.count)"); fflush(stdout)

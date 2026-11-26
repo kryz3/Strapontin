@@ -109,7 +109,7 @@ struct PlayerControlsView: View {
             }
 
             if let v = model.volumeShown {
-                Label("\(Int(v)) %", systemImage: v == 0 ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                Label(v == 0 ? "Son coupé" : "\(Int(v)) %", systemImage: VolumeControl.icon(volume: v, muted: false))
                     .font(.system(size: 13, weight: .semibold).monospacedDigit()).foregroundStyle(.white)
                     .padding(.horizontal, 14).padding(.vertical, 8)
                     .background(.ultraThinMaterial, in: Capsule())
@@ -252,7 +252,7 @@ struct PlayerControlsView: View {
                         TracksPanel(audio: model.audioTracks, subs: model.subTracks, qualities: live.qualities,
                                     currentQuality: live.currentQuality, selectQuality: actions.selectQuality) { t, type in actions.select(t, type: type) }
                     }
-                    VolumeControl(volume: model.volume, set: actions.setVolume, mute: actions.toggleMute)
+                    VolumeControl(volume: model.volume, muted: model.muted, set: actions.setVolume, mute: actions.toggleMute)
                     Button(action: actions.toggleMini) {
                         Image(systemName: model.mini ? "pip.exit" : "pip.enter").font(.system(size: 14, weight: .bold))
                     }
@@ -357,7 +357,7 @@ struct PlayerControlsView: View {
                                     addSubtitles: actions.addSubtitleFile, online: model.onlineSubs,
                                     searchOnline: actions.searchSubtitles, pickOnline: actions.pickOnlineSubtitle) { t, type in actions.select(t, type: type) }
                     }
-                    VolumeControl(volume: model.volume, set: actions.setVolume, mute: actions.toggleMute)
+                    VolumeControl(volume: model.volume, muted: model.muted, set: actions.setVolume, mute: actions.toggleMute)
                     Button(action: actions.toggleMini) {
                         Image(systemName: model.mini ? "pip.exit" : "pip.enter").font(.system(size: 14, weight: .bold))
                     }
@@ -514,20 +514,31 @@ struct TracksPanel: View {
 /// Rien ne se déroule ni ne bouge ; la molette sur le curseur et ↑ ↓ règlent aussi le volume.
 struct VolumeControl: View {
     let volume: Double
+    var muted = false
     let set: (Double) -> Void
     let mute: () -> Void
+
+    /// L'icône de l'état réel : coupé (ou à 0), puis une, deux ou trois ondes selon le volume.
+    static func icon(volume: Double, muted: Bool) -> String {
+        if muted || volume <= 0 { return "speaker.slash.fill" }
+        if volume < 34 { return "speaker.wave.1.fill" }
+        if volume < 67 { return "speaker.wave.2.fill" }
+        return "speaker.wave.3.fill"
+    }
 
     var body: some View {
         HStack(spacing: 8) {
             Button(action: mute) {
-                Image(systemName: volume == 0 ? "speaker.slash.fill" : volume < 50 ? "speaker.wave.1.fill" : "speaker.wave.2.fill")
+                Image(systemName: Self.icon(volume: volume, muted: muted))
                     .font(.system(size: 13, weight: .semibold))
-                    .frame(width: 16)
+                    .frame(width: 18)
+                    .contentTransition(.symbolEffect(.replace))
             }
             .buttonStyle(GlassCircle(size: 38))
-            .help(volume == 0 ? "Remettre le son (M)" : "Couper le son (M)")
+            .help(muted ? "Remettre le son (M)" : "Couper le son (M)")
             Slider(value: Binding(get: { min(volume, 100) }, set: set), in: 0...100)
                 .frame(width: 84).controlSize(.mini).tint(.white)
+                .opacity(muted ? 0.35 : 1)
                 .overlay(ScrollCatcher { delta in set(min(150, max(0, volume + delta * 2))) })
                 .help("Volume : \(Int(volume)) % (↑ ↓, molette)")
         }

@@ -26,6 +26,9 @@ final class MPVPlayer {
     var onTime: ((Double) -> Void)?
     var onDuration: ((Double) -> Void)?
     var onPause: ((Bool) -> Void)?
+    /// Son coupé / volume, tels que mpv les a (touche M, menus, réglage) : l'icône suit l'état réel.
+    var onMute: ((Bool) -> Void)?
+    var onVolume: ((Double) -> Void)?
     var onEndOfFile: (() -> Void)?
     /// (erreur, fin normale) : MPV_EVENT_END_FILE.
     var onEndFile: ((Bool, Bool) -> Void)?
@@ -81,6 +84,8 @@ final class MPVPlayer {
         mpv_observe_property(handle, 3, "pause", MPV_FORMAT_FLAG)
         mpv_observe_property(handle, 4, "eof-reached", MPV_FORMAT_FLAG)
         mpv_observe_property(handle, 5, "fullscreen", MPV_FORMAT_FLAG)
+        mpv_observe_property(handle, 6, "mute", MPV_FORMAT_FLAG)
+        mpv_observe_property(handle, 7, "volume", MPV_FORMAT_DOUBLE)
 
         mpv_set_wakeup_callback(handle, { ctx in
             guard let ctx else { return }
@@ -131,6 +136,7 @@ final class MPVPlayer {
                     let v = ptr.assumingMemoryBound(to: Double.self).pointee
                     DispatchQueue.main.async {
                         if name == "time-pos" { self.onTime?(v) } else if name == "duration" { self.onDuration?(v) }
+                        else if name == "volume" { self.onVolume?(v) }
                     }
                 } else if prop.format == MPV_FORMAT_FLAG {
                     let v = ptr.assumingMemoryBound(to: Int32.self).pointee != 0
@@ -139,6 +145,7 @@ final class MPVPlayer {
                         case "pause": self.onPause?(v)
                         case "eof-reached": if v { self.onEndOfFile?() } else { self.onLeftEndOfFile?() }
                         case "fullscreen": self.onFullscreen?(v)
+                        case "mute": self.onMute?(v)
                         default: break
                         }
                     }
