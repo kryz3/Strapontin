@@ -54,6 +54,20 @@ jobs:
           # une release publique ne contient jamais d'indexeur (ni adresse ni clé)
           ! /usr/libexec/PlistBuddy -c Print build/Strapontin.app/Contents/Info.plist | grep -q StrapontinIndexer
 
+      - name: Vérifier les sous-titres en ligne
+        env:
+          OPENSUBTITLES_API_KEY: ${{ secrets.OPENSUBTITLES_API_KEY }}
+        run: |
+          # la clé fournie avec l'app doit être là (brouillée), sinon on ne publie pas une app sans sous-titres en ligne
+          if [ -z "$OPENSUBTITLES_API_KEY" ]; then echo "::error::Secret OPENSUBTITLES_API_KEY absent"; exit 1; fi
+          /usr/libexec/PlistBuddy -c "Print :StrapontinOpenSubtitlesKeyX" build/Strapontin.app/Contents/Info.plist > /dev/null \
+            || { echo "::error::Clé OpenSubtitles absente de l'app"; exit 1; }
+          # et elle doit marcher : une vraie recherche (Matrix, en français), sans jamais afficher la clé
+          n=$(curl -s -H "Api-Key: $OPENSUBTITLES_API_KEY" -H "User-Agent: Strapontin v$STRAPONTIN_VERSION" \
+                "https://api.opensubtitles.com/api/v1/subtitles?languages=fr&tmdb_id=603" | python3 -c 'import json,sys; print(len(json.load(sys.stdin).get("data", [])))')
+          echo "Sous-titres trouvés : $n"
+          [ "$n" -gt 0 ] || { echo "::error::OpenSubtitles ne renvoie rien avec la clé fournie"; exit 1; }
+
       - name: Signer la mise à jour et écrire l'appcast
         env:
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
