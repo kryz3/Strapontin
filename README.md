@@ -34,8 +34,8 @@ documentation are in French.*
 - Fiche erronée : « Corriger la fiche », et la page suit la nouvelle fiche.
 
 **Interface**
-- Navigation façon Apple TV : une barre d'onglets translucide qui flotte sur les images (Accueil, Films, Séries,
-  Découvrir, téléchargements en cours) et s'efface quand on fait défiler. Une seule recherche (loupe ou ⌘F) : ta
+- Navigation façon Apple TV : une barre d'onglets translucide qui flotte sur les images (Accueil, Pour toi, Films,
+  Séries, Ma liste, En direct, téléchargements en cours). Un assistant guide le premier lancement. Une seule recherche (loupe ou ⌘F) : ta
   bibliothèque et tout le catalogue TMDb, section par section.
 - Tout réagit tout de suite : un téléchargement lancé apparaît aussitôt, une pause, une suppression ou une fiche
   corrigée se voient avant même la réponse du moteur ou du réseau (et reviennent en arrière si ça échoue).
@@ -43,7 +43,8 @@ documentation are in French.*
   « Ajoutés récemment », par genre ; fiches immersives, distribution, informations.
 - Séries épisode par épisode : image, date, durée et résumé de chaque épisode, une fiche par épisode avec
   précédent / suivant.
-- Découvrir : tendances et recherche dans tout le catalogue TMDb.
+- Accueil façon Netflix : « À suivre » en tête, Pour toi, Ma liste, tendances, puis ta bibliothèque. Fiche simple :
+  « Lire ▾ » (choix de la source), « + » Ma liste, « ⋯ ».
 - **Pour toi** (⌘4) : un fil de programmes choisis d'après tes goûts (bibliothèque, ce que tu regardes, Ma liste,
   réactions), calculé sur ton Mac. **Historique** (⌘Y), **Ma liste**, recherche par acteur.
 
@@ -59,7 +60,7 @@ documentation are in French.*
   ce Mac. Chargement progressif : les chaînes d'abord, l'index des films et séries ensuite, en fond.
 - **En direct** : chaînes rangées par pays et par thème, noms nettoyés (« FR| CANAL+ SPORT ᴴᴰ » → Canal+ Sport),
   variantes HD / Full HD / 4K regroupées avec choix de la qualité, recherche tolérante, favoris, zapping ↑ ↓,
-  programme en cours ; lecteur qui se répare tout seul quand le flux fige ou coupe.
+  programme en cours et guide en grille ; lecteur qui se répare tout seul quand le flux fige ou coupe.
 - Films et séries du fournisseur : « Regarder en streaming » sur la fiche TMDb du titre, choix de la version (VF,
   VOSTFR, 4K…).
 
@@ -74,6 +75,7 @@ documentation are in French.*
 - **Passer l'intro / le récap** : chapitres du fichier, sinon comparaison du son des épisodes d'une même saison,
   calculée sur ton Mac.
 - **Vignettes** au survol de la barre de temps (HDR et Dolby Vision compris).
+- Vitesse de lecture, « Reprise à … / Depuis le début », touche ? pour tous les raccourcis.
 
 **Téléchargements** (facultatif)
 - Moteur intégré (Transmission, sans fenêtre) ou qBittorrent. Un `.torrent` ou un lien magnet glissé sur la

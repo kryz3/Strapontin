@@ -5,6 +5,20 @@ La section d'une version sert de notes à sa release GitHub.
 
 ## [Non publié]
 
+## [0.1.5] - 2026-11-28
+
+- **Nouvelle organisation, façon Netflix** : onglets Accueil · Pour toi · Films · Séries · Ma liste · En direct.
+  L'Accueil commence par « À suivre », puis Pour toi, Ma liste et les tendances ; ta bibliothèque ensuite.
+- **Fiche plus simple** : « Lire ▾ » (avec le choix de la source), « + » pour Ma liste, et « ⋯ » pour le reste.
+- **Ma liste** : un onglet, et le « + » partout, même sans téléchargements configurés.
+- **Versions à télécharger lisibles** : la recommandée en tête, en mots simples (qualité, langue, taille, si ça
+  ira vite) ; le nom technique au survol.
+- **Lecteur** : vitesse de lecture (0,75× à 2×, touches [ ] =), « Reprise à … · Depuis le début », touche ? pour
+  les raccourcis.
+- **En direct** : guide des programmes en grille (chaînes × heures), clic pour regarder.
+- **Réglages** : l'essentiel visible, le reste dans « Avancé ».
+- **Assistant de démarrage** au premier lancement (rouvrable depuis Aide).
+
 ## [0.1.4] - 2026-11-26
 
 - **Choisir la source** : le bouton dit ce qui va se passer (« Lire · Fichier », « Reprendre · Streaming ») et
